@@ -1,6 +1,6 @@
 # Obsidian local state (not portable across machines)
-Notas/.obsidian/workspace*
-Notas/.obsidian/cache
+Anzo/.obsidian/workspace*
+Anzo/.obsidian/cache
 
 # Secrets
 .env

@@ -8,7 +8,7 @@ Asistente de voz personal que orquesta a Claude para desarrollar y diagnosticar 
 
 ## Estado
 
-En diseño. Ver `Notas/` (vault de Obsidian) para decisiones de arquitectura y notas de avance.
+En diseño. Ver `Anzo/` (vault de Obsidian) para decisiones de arquitectura y notas de avance.
 
 ## Alcance previsto
 
