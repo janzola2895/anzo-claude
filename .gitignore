@@ -2,6 +2,10 @@
 Anzo/.obsidian/workspace*
 Anzo/.obsidian/cache
 
+# Python
+__pycache__/
+*.pyc
+
 # Secrets
 .env
 .env.*
