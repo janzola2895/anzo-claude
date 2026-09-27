@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "browser": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest",
+        "--user-data-dir", ".browser-profile",
+        "--browser", "chrome"
+      ]
+    }
+  }
+}

@@ -41,8 +41,12 @@ SCRUBBED_ENV_KEYS = {"CLAUDECODE"}
 
 MODEL = os.environ.get("ANZO_MODEL", "").strip()
 PERMISSION_MODE = os.environ.get("ANZO_PERMISSION_MODE", "acceptEdits").strip()
-MCP_CONFIG_PATH = os.environ.get("ANZO_MCP_CONFIG", "").strip()
 WORKDIR = os.path.expanduser(os.environ.get("ANZO_WORKDIR", os.getcwd()))
+
+_default_mcp_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp-config.json")
+MCP_CONFIG_PATH = os.environ.get("ANZO_MCP_CONFIG", "").strip() or (
+    _default_mcp_config if os.path.isfile(_default_mcp_config) else ""
+)
 IDLE_TIMEOUT_S = int(os.environ.get("ANZO_IDLE_TIMEOUT", "180"))
 
 # One Claude subprocess at a time. Guarded so a new voice instruction can
@@ -97,6 +101,13 @@ def build_command(message: str, session_id: str | None = None) -> list[str]:
         cmd += ["--permission-mode", PERMISSION_MODE]
     if MCP_CONFIG_PATH:
         cmd += ["--mcp-config", MCP_CONFIG_PATH]
+        # Headless mode has no one to answer a permission prompt, and MCP
+        # tools aren't covered by --permission-mode acceptEdits (that only
+        # auto-approves file edits and a handful of filesystem commands) —
+        # without this the browser tools would just be silently denied.
+        # Pre-approving the whole "browser" server (not bypassPermissions
+        # for everything) keeps the blast radius to just that tool.
+        cmd += ["--allowedTools", "mcp__browser"]
     return cmd
 
 

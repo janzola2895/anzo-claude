@@ -6,6 +6,9 @@ Anzo/.obsidian/cache
 __pycache__/
 *.pyc
 
+# Persistent browser profile (Playwright MCP) — real login cookies live here
+.browser-profile/
+
 # Secrets
 .env
 .env.*
