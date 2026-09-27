@@ -1,0 +1,11 @@
+# Obsidian local state (not portable across machines)
+Notas/.obsidian/workspace*
+Notas/.obsidian/cache
+
+# Secrets
+.env
+.env.*
+
+# OS junk
+Thumbs.db
+.DS_Store
