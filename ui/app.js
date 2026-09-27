@@ -127,6 +127,7 @@ function startTurn(message) {
     switch (ev.t) {
       case "status":
         sessionId = ev.session_id || sessionId;
+        logLine("sys", `(modelo: ${ev.model}, herramientas: ${ev.tools}, mcp: [${(ev.mcp || []).join(", ")}])`);
         break;
       case "delta":
         replyBuffer += ev.text;
