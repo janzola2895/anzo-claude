@@ -47,6 +47,24 @@ _default_mcp_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "
 MCP_CONFIG_PATH = os.environ.get("ANZO_MCP_CONFIG", "").strip() or (
     _default_mcp_config if os.path.isfile(_default_mcp_config) else ""
 )
+
+# Without this, Claude defaults to its general-coding-agent instincts and
+# reaches for Bash/PowerShell (Start-Process) to "open a browser" — a real,
+# observed failure mode. Those commands don't drive the Playwright browser
+# at all, and since headless mode can't show a permission prompt, they just
+# hang waiting for an approval that will never come. This has to be said
+# explicitly; having the tool available isn't enough for Claude to prefer it.
+BROWSER_SYSTEM_PROMPT = (
+    "Eres ANZO, un asistente de voz para desarrollar y diagnosticar Microsoft "
+    "Power Platform (Canvas Apps, Power Automate) controlando un navegador real. "
+    "Para CUALQUIER interaccion con paginas web o el navegador (abrir, navegar, "
+    "hacer clic, escribir, leer la pantalla) usa EXCLUSIVAMENTE las herramientas "
+    "mcp__browser__*. NUNCA uses Bash, PowerShell, cmd, Start-Process ni ningun "
+    "comando de shell para abrir un navegador o una URL: esas herramientas no "
+    "controlan el navegador correcto y se quedan bloqueadas esperando una "
+    "aprobacion que nunca va a llegar. Tus respuestas se leen en voz alta: "
+    "responde en frases cortas y naturales, sin markdown ni listas."
+)
 IDLE_TIMEOUT_S = int(os.environ.get("ANZO_IDLE_TIMEOUT", "180"))
 
 # One Claude subprocess at a time. Guarded so a new voice instruction can
@@ -108,6 +126,7 @@ def build_command(message: str, session_id: str | None = None) -> list[str]:
         # Pre-approving the whole "browser" server (not bypassPermissions
         # for everything) keeps the blast radius to just that tool.
         cmd += ["--allowedTools", "mcp__browser"]
+        cmd += ["--append-system-prompt", BROWSER_SYSTEM_PROMPT]
     return cmd
 
 
