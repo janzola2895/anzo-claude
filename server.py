@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import time
+import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -113,6 +114,19 @@ def start_browser_mcp():
     print(f"Starting browser MCP server on port {BROWSER_MCP_PORT}, "
           f"attaching to Chrome via CDP — first launch downloads the package, give it a moment.")
     return proc
+
+
+class Server(ThreadingHTTPServer):
+    def handle_error(self, request, client_address):
+        # A browser tab closing or navigating away mid-request (an SSE
+        # stream in particular) aborts the connection from the client side
+        # -- normal and frequent, not a bug. socketserver's default
+        # handle_error prints a full traceback for it; only do that for
+        # exceptions that aren't just "the other side hung up".
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -234,9 +248,22 @@ def main():
         time.sleep(2)  # let Chrome's devtools port come up before Playwright MCP tries it
     browser_mcp_proc = start_browser_mcp() if chrome_proc else None
 
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    # ThreadingHTTPServer's constructor already binds and listens, so the
+    # page is reachable immediately even though serve_forever() hasn't
+    # started accepting connections yet.
+    server = Server((HOST, PORT), Handler)
     print(f"ANZO listening on http://{HOST}:{PORT}")
     print(f"(token is embedded in the served page automatically)")
+
+    # Opens in the OS's default browser -- NOT the dedicated automation
+    # Chrome instance from start_chrome(), which is a separate profile/
+    # process reserved for Playwright to drive Power Apps/Automate in.
+    # Loading this page in that same automation window was the actual
+    # cause of "it stopped listening after I said open PowerApps": Claude
+    # navigated the only tab that instance had open, which happened to be
+    # this one, out from under its own running voice UI.
+    webbrowser.open(f"http://{HOST}:{PORT}")
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
