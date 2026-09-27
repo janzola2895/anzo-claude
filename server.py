@@ -23,7 +23,10 @@ import json
 import mimetypes
 import os
 import secrets
+import shutil
+import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -34,6 +37,36 @@ HOST = "127.0.0.1"
 TOKEN = secrets.token_urlsafe(24)
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui")
 ALLOWED_ORIGIN = f"http://{HOST}:{PORT}"
+
+BROWSER_MCP_PORT = int(os.environ.get("ANZO_BROWSER_MCP_PORT", "8931"))
+PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".browser-profile")
+
+
+def start_browser_mcp():
+    """Launch the Playwright MCP server as its own long-lived process, separate
+    from any single `claude -p` turn. Each turn is a short-lived client that
+    connects to this over HTTP (see mcp-config.json's "url") and disconnects
+    when the turn ends — the browser and its login session live as long as
+    THIS process does, not as long as the turn that happened to use it.
+    Without this, the browser window closes the instant each turn's `claude -p`
+    process exits, since it would otherwise be spawned as that process's own
+    stdio child."""
+    npx = shutil.which("npx")
+    if not npx:
+        print("WARNING: npx not found — browser control will not be available "
+              "(install Node.js). Continuing with voice-only.")
+        return None
+    cmd = [npx, "@playwright/mcp@latest",
+           "--port", str(BROWSER_MCP_PORT),
+           "--user-data-dir", PROFILE_DIR,
+           "--browser", "chrome"]
+    kwargs = dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if sys.platform == "win32":
+        kwargs["shell"] = True  # same npx.cmd-shim reason as brain.py
+    proc = subprocess.Popen(cmd, **kwargs)
+    print(f"Starting browser MCP server on port {BROWSER_MCP_PORT} "
+          f"(profile: {PROFILE_DIR}) — first launch downloads the package, give it a moment.")
+    return proc
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -141,6 +174,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    browser_proc = start_browser_mcp()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"ANZO listening on http://{HOST}:{PORT}")
     print(f"(token is embedded in the served page automatically)")
@@ -150,6 +184,12 @@ def main():
         pass
     finally:
         server.server_close()
+        if browser_proc and browser_proc.poll() is None:
+            browser_proc.terminate()
+            try:
+                browser_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                browser_proc.kill()
 
 
 if __name__ == "__main__":

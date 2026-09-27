@@ -1,12 +1,7 @@
 {
   "mcpServers": {
     "browser": {
-      "command": "npx",
-      "args": [
-        "@playwright/mcp@latest",
-        "--user-data-dir", ".browser-profile",
-        "--browser", "chrome"
-      ]
+      "url": "http://localhost:8931/mcp"
     }
   }
 }
