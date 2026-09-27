@@ -65,12 +65,16 @@ let spanishVoice = null;
 function pickSpanishVoice() {
   const voices = window.speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().startsWith("es"));
   if (!voices.length) return null;
-  // Windows 11 "Natural" voices (installed under Settings > Time & Language >
-  // Speech) sound far less robotic than the classic SAPI5 ones Chrome
-  // defaults to — prefer one if the user has any installed, for free.
+  // Preference order, all free, no setup required beyond what's already
+  // installed: a Windows 11 "Natural" voice (far less robotic than classic
+  // SAPI5, but only present if the user added one under Settings > Time &
+  // Language > Speech) > Chrome's own cloud "Google" voices (usually
+  // decent quality, no installation needed, just requires internet) >
+  // any other local voice > whatever's first.
   const natural = voices.find((v) => /natural/i.test(v.name));
+  const google = voices.find((v) => /google/i.test(v.name));
   const local = voices.find((v) => v.localService);
-  return natural || local || voices[0];
+  return natural || google || local || voices[0];
 }
 
 if (window.speechSynthesis) {
@@ -78,9 +82,23 @@ if (window.speechSynthesis) {
   window.speechSynthesis.onvoiceschanged = () => { spanishVoice = pickSpanishVoice(); };
 }
 
+// Rolling buffer of what Anzo has recently said, so speech recognition
+// picking up its own voice through the speakers isn't mistaken for the
+// user interrupting. Not real acoustic echo cancellation (the Web Speech
+// API doesn't expose the mic constraints needed for that) -- just a
+// text-similarity check against what should currently be audible.
+let recentlySpoken = "";
+
+function looksLikeEcho(heard) {
+  const n = normalize(heard).trim();
+  if (n.length < 4) return false; // too short to judge either way
+  return recentlySpoken.includes(n);
+}
+
 function speak(rawText) {
   const text = stripMarkdown(rawText);
   if (!text.trim() || !window.speechSynthesis) return;
+  recentlySpoken = (recentlySpoken + " " + normalize(text)).slice(-500);
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "es-CO";
   if (spanishVoice) u.voice = spanishVoice;
@@ -112,6 +130,8 @@ function startTurn(message) {
     logLine("sys", "(interrumpido)");
     interruptCurrentTurn();
   }
+  clearTimeout(listeningTimeout);
+  recentlySpoken = "";
   state = State.WORKING;
   setOrb("working");
   setStatus("Pensando…");
@@ -145,37 +165,53 @@ function startTurn(message) {
         sessionId = ev.session_id || sessionId;
         flushSentence(true);
         if (replyBuffer.trim()) logLine("anzo", "Anzo: " + replyBuffer.trim());
-        finishTurn("Di \"Anzo\" para el siguiente paso");
+        finishTurn("Puedes responder directamente, o di \"Anzo\" para algo nuevo");
         break;
       case "interrupted":
-        finishTurn("Interrumpido. Di \"Anzo\" para continuar");
+        finishTurn("Interrumpido. Puedes seguir hablando");
         break;
       case "error":
         logLine("sys", "Error: " + ev.message);
-        finishTurn("Hubo un error. Di \"Anzo\" para reintentar");
+        finishTurn("Hubo un error. Puedes reintentar");
         break;
     }
   };
 
   eventSource.onerror = () => {
     if (eventSource) { eventSource.close(); eventSource = null; }
-    if (state === State.WORKING) finishTurn("Se perdió la conexión. Di \"Anzo\" para reintentar");
+    if (state === State.WORKING) finishTurn("Se perdió la conexión. Puedes reintentar");
   };
 }
 
+// After a turn ends, keep listening for a follow-up without requiring the
+// wake word again for a short window -- answering a question Anzo just
+// asked, or a quick correction, shouldn't need "Anzo" every single time.
+// Falls back to requiring the wake word again if nothing is said in time.
+let listeningTimeout = null;
+const FOLLOW_UP_WINDOW_MS = 12000;
+
 function finishTurn(statusText) {
   eventSource = null;
-  state = State.IDLE;
-  setOrb("idle");
+  state = State.LISTENING;
+  setOrb("listening");
   setStatus(statusText);
+  clearTimeout(listeningTimeout);
+  listeningTimeout = setTimeout(() => {
+    if (state === State.LISTENING) {
+      state = State.IDLE;
+      setOrb("idle");
+      setStatus("Di \"Anzo\" para empezar");
+    }
+  }, FOLLOW_UP_WINDOW_MS);
 }
 
 function onFinalUtterance(text) {
   if (!text.trim()) return;
 
   if (state === State.WORKING) {
-    // Any speech while a turn is running is an interrupt: stop it and
-    // treat this utterance as the new instruction, same session.
+    if (looksLikeEcho(text)) return; // Anzo's own voice bleeding into the mic, not a real interrupt
+    // Any other speech while a turn is running is an interrupt: stop it
+    // and treat this utterance as the new instruction, same session.
     startTurn(text);
     return;
   }

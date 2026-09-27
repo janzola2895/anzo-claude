@@ -40,7 +40,14 @@ SCRUBBED_ENV_PREFIXES = ("CLAUDE_CODE_", "ANTHROPIC_")
 SCRUBBED_ENV_KEYS = {"CLAUDECODE"}
 
 MODEL = os.environ.get("ANZO_MODEL", "").strip()
-PERMISSION_MODE = os.environ.get("ANZO_PERMISSION_MODE", "acceptEdits").strip()
+# Empty by default (falls back to the CLI's own "Manual" mode) rather than
+# "acceptEdits": ANZO's whole job right now is browser control via
+# --allowedTools mcp__browser below, not local file edits. acceptEdits also
+# auto-approves filesystem commands (mkdir/mv/cp/...) that have nothing to
+# do with that job -- unnecessary blast radius once this is actually
+# touching real Indra business apps. Anything outside the browser allowlist
+# now gets blocked instead of silently allowed.
+PERMISSION_MODE = os.environ.get("ANZO_PERMISSION_MODE", "").strip()
 WORKDIR = os.path.expanduser(os.environ.get("ANZO_WORKDIR", os.getcwd()))
 
 _default_mcp_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp-config.json")
