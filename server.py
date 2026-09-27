@@ -59,7 +59,14 @@ def start_browser_mcp():
     cmd = [npx, "@playwright/mcp@latest",
            "--port", str(BROWSER_MCP_PORT),
            "--user-data-dir", PROFILE_DIR,
-           "--browser", "chrome"]
+           "--browser", "chrome",
+           # Each turn is its own short-lived HTTP client connecting to this
+           # server. Without this flag, every connecting client gets its own
+           # isolated browser context that gets torn down when it
+           # disconnects -- confirmed by testing: the tab survived only
+           # ~5s past the end of each turn. This makes every turn share the
+           # one browser/tab instead of each getting (and losing) its own.
+           "--shared-browser-context"]
     # No stdout=PIPE here: nothing was reading that pipe, so its output
     # buffer would eventually fill and silently block the process (and any
     # startup error would be invisible instead of just failing loudly).
