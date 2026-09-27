@@ -27,19 +27,23 @@ function logLine(cls, text) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+// "jarvis" is here because Chrome's Spanish recognizer routinely mishears
+// the English pronunciation as "yarvis" -- both are accepted.
+const WAKE_WORDS = ["anzo", "yarvis", "jarvis", "viernes"];
+const WAKE_WORD_ALT = WAKE_WORDS.join("|");
+
 function stripWakeWord(text) {
-  // "anzo" / "hola anzo", accent-insensitive, wherever it sits in the utterance.
-  const m = /(?:hola\s+)?anzo[,:]?\s*/i.exec(normalize(text));
+  // normalize() maps each character 1:1 (accented -> base letter, same
+  // length) so an index found in the normalized string lines up with the
+  // same position in the original.
+  const re = new RegExp(`(?:hola\\s+)?(?:${WAKE_WORD_ALT})[,:]?\\s*`, "i");
+  const m = re.exec(normalize(text));
   if (!m) return null;
   return text.slice(m.index + m[0].length).trim();
 }
 
 function normalize(text) {
   return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-}
-
-function containsWakeWord(text) {
-  return /\banzo\b/.test(normalize(text));
 }
 
 function stripMarkdown(text) {
