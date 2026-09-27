@@ -133,6 +133,13 @@ def run(message: str, session_id: str | None = None):
     popen_kwargs = dict(
         cwd=WORKDIR,
         text=True,
+        # Windows' default subprocess text decoding uses the system locale
+        # codepage (e.g. cp1252), not UTF-8 — claude's stdout is UTF-8, so
+        # without this every accented character comes back mojibake'd
+        # ("está" -> "estÃ¡"). errors="replace" keeps a rare bad byte from
+        # crashing the stream instead of just showing oddly.
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -157,11 +164,15 @@ def run(message: str, session_id: str | None = None):
     out_lock = threading.Lock()
     done = threading.Event()
 
+    pump_error: list = []
+
     def pump_out():
         try:
             for line in proc.stdout:
                 with out_lock:
                     out_q.append(line)
+        except Exception as e:  # noqa: BLE001 - surfaced via pump_error, not swallowed
+            pump_error.append(e)
         finally:
             done.set()
 
@@ -274,7 +285,20 @@ def run(message: str, session_id: str | None = None):
                            ms=ev.get("duration_ms") or int((time.monotonic() - started) * 1000))
                 return
 
-        rc = proc.wait(timeout=5)
+        if pump_error:
+            proc.kill()
+            yield dict(t="error", message=f"lost the claude output stream: {pump_error[0]}"[:400])
+            return
+
+        try:
+            rc = proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            # pump_out saw EOF (done.set()) but the process itself hasn't
+            # exited yet — give it a moment, then stop waiting on it rather
+            # than crash the request thread.
+            proc.kill()
+            yield dict(t="error", message="claude did not exit after finishing output")
+            return
         if rc not in (0, None):
             with _active_lock:
                 was_ours = _active_proc is proc
