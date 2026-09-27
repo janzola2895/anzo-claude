@@ -1,6 +1,7 @@
 {
   "mcpServers": {
     "browser": {
+      "type": "http",
       "url": "http://localhost:8931/mcp"
     }
   }

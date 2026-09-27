@@ -244,6 +244,18 @@ def run(message: str, session_id: str | None = None):
                 emitted_session = sid
 
             if kind == "system" and ev.get("subtype") == "init":
+                # mcp_server_errors: config entries Claude Code rejected at
+                # startup (e.g. a "url" server missing "type") -- it skips
+                # them and carries on silently otherwise, which is exactly
+                # how this project's own browser MCP server config went
+                # unnoticed as broken for a while. Surface it instead.
+                for err in ev.get("mcp_server_errors") or []:
+                    # "warning", not "error": the turn keeps going without
+                    # that tool, so this must not be one of the types that
+                    # makes server.py close the stream.
+                    yield dict(t="warning", message=(
+                        f"MCP server '{err.get('name')}' failed to load "
+                        f"({err.get('type')}): {err.get('message')}"))
                 yield dict(
                     t="status",
                     model=ev.get("model") or MODEL or "default",

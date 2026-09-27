@@ -137,6 +137,9 @@ function startTurn(message) {
       case "tool":
         if (ev.phase === "use") logLine("sys", "→ " + ev.name);
         break;
+      case "warning":
+        logLine("sys", "⚠ " + ev.message);
+        break;
       case "complete":
         sessionId = ev.session_id || sessionId;
         flushSentence(true);
