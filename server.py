@@ -39,18 +39,60 @@ UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui")
 ALLOWED_ORIGIN = f"http://{HOST}:{PORT}"
 
 BROWSER_MCP_PORT = int(os.environ.get("ANZO_BROWSER_MCP_PORT", "8931"))
+CHROME_DEBUG_PORT = int(os.environ.get("ANZO_CHROME_DEBUG_PORT", "9223"))
 PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".browser-profile")
+
+CHROME_PATHS = [
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+]
+
+
+def _find_chrome():
+    found = shutil.which("chrome") or shutil.which("google-chrome")
+    if found:
+        return found
+    for p in CHROME_PATHS:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def start_chrome():
+    """Launch Chrome ourselves, as our own long-lived process, instead of
+    letting Playwright MCP launch (and therefore own) it.
+
+    Playwright MCP's maintainer confirmed the browser's lifetime is tied to
+    the MCP client CONNECTION's lifetime by design ("we rely on the
+    connection-is-a-lifetime model" -- microsoft/playwright-mcp#1302): the
+    browser closes whenever the connected client goes away, with no opt-out.
+    Since every claude -p turn is its own short-lived client that connects
+    and then disconnects when the turn ends, that meant the browser closed
+    at the end of every single turn -- confirmed live, repeatedly.
+
+    Fix: launch Chrome ourselves with a devtools port open, and have
+    Playwright MCP attach to it over CDP (start_browser_mcp) instead of
+    spawning its own. It doesn't own this process, so a client disconnecting
+    just ends Playwright MCP's control of it, not the browser itself."""
+    chrome = _find_chrome()
+    if not chrome:
+        print("WARNING: Chrome not found in the usual install locations — "
+              "browser control will not be available. Continuing with voice-only.")
+        return None
+    cmd = [chrome,
+           f"--remote-debugging-port={CHROME_DEBUG_PORT}",
+           f"--user-data-dir={PROFILE_DIR}",
+           "--no-first-run", "--no-default-browser-check"]
+    proc = subprocess.Popen(cmd)
+    print(f"Starting Chrome with a devtools port on {CHROME_DEBUG_PORT} "
+          f"(profile: {PROFILE_DIR})")
+    return proc
 
 
 def start_browser_mcp():
-    """Launch the Playwright MCP server as its own long-lived process, separate
-    from any single `claude -p` turn. Each turn is a short-lived client that
-    connects to this over HTTP (see mcp-config.json's "url") and disconnects
-    when the turn ends — the browser and its login session live as long as
-    THIS process does, not as long as the turn that happened to use it.
-    Without this, the browser window closes the instant each turn's `claude -p`
-    process exits, since it would otherwise be spawned as that process's own
-    stdio child."""
+    """Launch the Playwright MCP server as its own long-lived process, attached
+    to the Chrome instance from start_chrome() via CDP rather than launching
+    (and owning) its own browser."""
     npx = shutil.which("npx")
     if not npx:
         print("WARNING: npx not found — browser control will not be available "
@@ -58,15 +100,7 @@ def start_browser_mcp():
         return None
     cmd = [npx, "@playwright/mcp@latest",
            "--port", str(BROWSER_MCP_PORT),
-           "--user-data-dir", PROFILE_DIR,
-           "--browser", "chrome",
-           # Each turn is its own short-lived HTTP client connecting to this
-           # server. Without this flag, every connecting client gets its own
-           # isolated browser context that gets torn down when it
-           # disconnects -- confirmed by testing: the tab survived only
-           # ~5s past the end of each turn. This makes every turn share the
-           # one browser/tab instead of each getting (and losing) its own.
-           "--shared-browser-context"]
+           "--cdp-endpoint", f"http://localhost:{CHROME_DEBUG_PORT}"]
     # No stdout=PIPE here: nothing was reading that pipe, so its output
     # buffer would eventually fill and silently block the process (and any
     # startup error would be invisible instead of just failing loudly).
@@ -76,8 +110,8 @@ def start_browser_mcp():
     if sys.platform == "win32":
         kwargs["shell"] = True  # same npx.cmd-shim reason as brain.py
     proc = subprocess.Popen(cmd, **kwargs)
-    print(f"Starting browser MCP server on port {BROWSER_MCP_PORT} "
-          f"(profile: {PROFILE_DIR}) — first launch downloads the package, give it a moment.")
+    print(f"Starting browser MCP server on port {BROWSER_MCP_PORT}, "
+          f"attaching to Chrome via CDP — first launch downloads the package, give it a moment.")
     return proc
 
 
@@ -185,8 +219,21 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200, {"cancelled": cancelled})
 
 
+def _stop(proc, name):
+    if proc and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def main():
-    browser_proc = start_browser_mcp()
+    chrome_proc = start_chrome()
+    if chrome_proc:
+        time.sleep(2)  # let Chrome's devtools port come up before Playwright MCP tries it
+    browser_mcp_proc = start_browser_mcp() if chrome_proc else None
+
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"ANZO listening on http://{HOST}:{PORT}")
     print(f"(token is embedded in the served page automatically)")
@@ -196,12 +243,8 @@ def main():
         pass
     finally:
         server.server_close()
-        if browser_proc and browser_proc.poll() is None:
-            browser_proc.terminate()
-            try:
-                browser_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                browser_proc.kill()
+        _stop(browser_mcp_proc, "browser MCP")
+        _stop(chrome_proc, "Chrome")
 
 
 if __name__ == "__main__":
