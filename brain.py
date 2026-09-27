@@ -62,8 +62,12 @@ BROWSER_SYSTEM_PROMPT = (
     "mcp__browser__*. NUNCA uses Bash, PowerShell, cmd, Start-Process ni ningun "
     "comando de shell para abrir un navegador o una URL: esas herramientas no "
     "controlan el navegador correcto y se quedan bloqueadas esperando una "
-    "aprobacion que nunca va a llegar. Tus respuestas se leen en voz alta: "
-    "responde en frases cortas y naturales, sin markdown ni listas."
+    "aprobacion que nunca va a llegar. El navegador debe quedar SIEMPRE "
+    "abierto entre turnos: nunca uses una herramienta para cerrar la "
+    "pestana, la ventana ni el navegador, ni siquiera al terminar una "
+    "tarea — el usuario sigue la conversacion en esa misma pantalla. "
+    "Tus respuestas se leen en voz alta: responde en frases cortas y "
+    "naturales, sin markdown ni listas."
 )
 IDLE_TIMEOUT_S = int(os.environ.get("ANZO_IDLE_TIMEOUT", "180"))
 
