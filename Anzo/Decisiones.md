@@ -29,10 +29,15 @@ Ambos clonados y su código real leído en `C:\dev\_ref\` (temporal, no versiona
 
 **Lección operativa importante:** los comandos que Claude Code ejecuta por su cuenta (vía su propia terminal) corren en un entorno aislado del escritorio real del usuario — instalaciones globales de npm y el login de `claude` hecho ahí NO se reflejan en las terminales reales del usuario, y viceversa. Cualquier instalación de paquete o login debe pedírsele al usuario que lo corra él mismo en su propia terminal; los archivos de texto (crear/editar código) sí se comparten normalmente entre ambos entornos.
 
-## Pendiente por decidir / construir
+## Hito: primer flujo completo funcionando (2026-09-27)
 
-- ~~Motor de wake-word~~ / ~~Proveedor de voz~~ / ~~Cómo se conecta con Claude~~ → resuelto arriba
-- Implementar la palabra clave "Anzo"/"Hola Anzo" (ninguno de los dos proyectos base la tiene)
-- Implementar interrupción en caliente real mientras un turno ya está corriendo (ambos proyectos base suspenden la escucha durante un turno — lo opuesto a lo que necesitamos)
-- Conectar un MCP de navegador (Playwright) para Power Apps / Power Automate
-- Definir `--permission-mode` (bypassPermissions vs. algo más acotado, dado que va a tocar apps reales de negocio)
+Voz → Claude → navegador → Power Apps, de punta a punta, en la máquina real. Ver [[Arquitectura]] para cómo queda armado y [[Problemas resueltos]] para la bitácora completa de cada bug encontrado en el camino (varios fueron bastante enredados — vale la pena leerla antes de tocar `server.py`/`brain.py`/`mcp-config.json`).
+
+Palabras clave activas: "Anzo", "Hola Anzo", "Yarvis"/"Jarvis", "Viernes" (referencias a Iron Man).
+
+## Pendiente / mejoras futuras
+
+- Interrupción en caliente **real** a mitad de una acción del navegador (hoy: cualquier habla nueva mientras hay un turno activo lo interrumpe y reemplaza — funciona, pero es sensible a que el micrófono capte fragmentos sueltos o la propia voz de Anzo; ver nota de audífonos en [[Problemas resueltos]])
+- `--permission-mode` está en `acceptEdits` con `--allowedTools mcp__browser` — revisar si conviene acotarlo más ahora que sí toca apps reales de negocio de Indra
+- Voz más natural: hoy usa la voz de Windows por defecto (robótica); pendiente instalar una voz "Natural" de Windows si el build del usuario la ofrece, o evaluar Fish Audio (de pago) más adelante
+- El repo `C:\dev\_ref\` (clones de ethanplusai/jarvis e Itsme23476/jarvis-claude-code) es temporal/no versionado — se puede borrar, ya se extrajo lo útil
