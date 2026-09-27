@@ -60,7 +60,12 @@ def start_browser_mcp():
            "--port", str(BROWSER_MCP_PORT),
            "--user-data-dir", PROFILE_DIR,
            "--browser", "chrome"]
-    kwargs = dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    # No stdout=PIPE here: nothing was reading that pipe, so its output
+    # buffer would eventually fill and silently block the process (and any
+    # startup error would be invisible instead of just failing loudly).
+    # Inheriting the parent's console is simpler and correct for a
+    # single-user local tool.
+    kwargs = {}
     if sys.platform == "win32":
         kwargs["shell"] = True  # same npx.cmd-shim reason as brain.py
     proc = subprocess.Popen(cmd, **kwargs)
