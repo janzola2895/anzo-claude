@@ -42,6 +42,20 @@ function containsWakeWord(text) {
   return /\banzo\b/.test(normalize(text));
 }
 
+function stripMarkdown(text) {
+  return text
+    .replace(/```[\s\S]*?```/g, "")           // fenced code blocks
+    .replace(/`([^`]+)`/g, "$1")              // inline code
+    .replace(/\*\*([^*]+)\*\*/g, "$1")        // bold **text**
+    .replace(/__([^_]+)__/g, "$1")            // bold __text__
+    .replace(/\*([^*]+)\*/g, "$1")            // italic *text*
+    .replace(/(?<!\w)_([^_]+)_(?!\w)/g, "$1") // italic _text_
+    .replace(/^#{1,6}\s+/gm, "")              // headers
+    .replace(/^[-*+]\s+/gm, "")               // bullet markers
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")  // [text](url)
+    .replace(/^>\s?/gm, "");                  // blockquote markers
+}
+
 let spanishVoice = null;
 
 function pickSpanishVoice() {
@@ -60,7 +74,8 @@ if (window.speechSynthesis) {
   window.speechSynthesis.onvoiceschanged = () => { spanishVoice = pickSpanishVoice(); };
 }
 
-function speak(text) {
+function speak(rawText) {
+  const text = stripMarkdown(rawText);
   if (!text.trim() || !window.speechSynthesis) return;
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "es-CO";
