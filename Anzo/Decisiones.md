@@ -35,9 +35,15 @@ Voz → Claude → navegador → Power Apps, de punta a punta, en la máquina re
 
 Palabras clave activas: "Anzo", "Hola Anzo", "Yarvis"/"Jarvis", "Viernes" (referencias a Iron Man).
 
+## Mejoras aplicadas (2026-09-27, segunda ronda)
+
+- **Interrupción más robusta:** se ignora habla que coincide con lo que Anzo acaba de decir (filtro de eco por similitud de texto — no es cancelación acústica real, la Web Speech API no da acceso a eso, pero funciona razonablemente bien). Además, después de que un turno termina, se sigue escuchando sin pedir la palabra clave de nuevo durante 12 segundos — para responder una pregunta de Anzo o corregirlo rápido sin repetir "Anzo" cada vez.
+- **Voz:** se agregó preferencia por voces "Google" de Chrome (gratis, sin instalar nada) como segunda opción antes de caer a la voz robótica de Windows.
+- **Permisos acotados:** se quitó `acceptEdits` del `--permission-mode` (quedó vacío = modo Manual de la CLI). Con `--allowedTools mcp__browser` ya alcanza para lo que ANZO hace hoy; cualquier otra cosa (editar archivos, comandos de sistema) ahora queda bloqueada en vez de auto-aprobada.
+- Se borró `C:\dev\_ref\` (clones temporales de referencia, ya no se necesitaban).
+
 ## Pendiente / mejoras futuras
 
-- Interrupción en caliente **real** a mitad de una acción del navegador (hoy: cualquier habla nueva mientras hay un turno activo lo interrumpe y reemplaza — funciona, pero es sensible a que el micrófono capte fragmentos sueltos o la propia voz de Anzo; ver nota de audífonos en [[Problemas resueltos]])
-- `--permission-mode` está en `acceptEdits` con `--allowedTools mcp__browser` — revisar si conviene acotarlo más ahora que sí toca apps reales de negocio de Indra
-- Voz más natural: hoy usa la voz de Windows por defecto (robótica); pendiente instalar una voz "Natural" de Windows si el build del usuario la ofrece, o evaluar Fish Audio (de pago) más adelante
-- El repo `C:\dev\_ref\` (clones de ethanplusai/jarvis e Itsme23476/jarvis-claude-code) es temporal/no versionado — se puede borrar, ya se extrajo lo útil
+- Probar tareas reales de desarrollo/diagnóstico en Power Apps y Power Automate (hasta ahora solo se probó navegación) — es el objetivo real del proyecto y todavía no se ha ejercitado
+- El filtro de eco es una heurística de texto, no cancelación acústica real — usar audífonos sigue siendo lo más confiable si el falso-positivo persiste
+- Evaluar Fish Audio (de pago) si ni la voz de Windows ni la de Google de Chrome resultan suficientemente naturales
