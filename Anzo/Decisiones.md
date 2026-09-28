@@ -51,3 +51,15 @@ El usuario inició sesión con sus credenciales reales de Indra en la ventana de
 - Probar tareas reales de **desarrollo/diagnóstico** (editar un campo de una Canvas App, revisar el historial de un flujo de Power Automate, etc.) — la navegación ya funciona, pero esto sigue siendo lo no probado del objetivo original
 - El filtro de eco es una heurística de texto, no cancelación acústica real — usar audífonos sigue siendo lo más confiable si el falso-positivo persiste
 - Evaluar Fish Audio (de pago) si la voz de Google de Chrome no resulta suficiente
+
+### Pedidos del usuario (2026-09-27), a resolver más adelante
+
+1. **Interfaz más amigable/"tecnológica".** Hoy es solo una esfera + log de texto (`ui/`). Referencia posible: el HUD de `ethanplusai/jarvis` (orbe en three.js, 2000 partículas reactivas a la voz) — vale la pena mirarlo de nuevo como inspiración visual, no para copiar código.
+
+2. **Arrancar solo al iniciar Windows.** Hoy hay que correr `python server.py` a mano cada vez. Opciones a evaluar: acceso directo en la carpeta de Inicio de Windows (`shell:startup`), una tarea programada (Task Scheduler, "al iniciar sesión"), o un servicio de Windows (más robusto, más complejo de montar). Probablemente la carpeta de Inicio es la más simple para empezar.
+
+3. **Dos modos de activación.** El usuario quiere poder elegir entre:
+   - **Modo actual (ya funciona):** hay que decir la palabra clave ("Anzo"/"Yarvis"/"Viernes") antes de cada petición.
+   - **Modo conversación (nuevo):** una vez activado, no hace falta repetir la palabra clave en cada turno — se habla natural y seguido. Se pausa con una palabra (propuso "Pausa") y se termina con una frase de despedida tipo radio (propuso "Cambio y fuera"). Pidió explícitamente recomendaciones.
+
+   **Nota técnica para cuando se retome:** el "modo conversación" es, en el fondo, extender indefinidamente la ventana de seguimiento post-turno de 12 segundos que ya existe (`FOLLOW_UP_WINDOW_MS` en `app.js`) hasta que se diga la palabra de pausa/fin, en vez de que expire sola. Recomendación: activar/desactivar el modo también por voz (ej. "Anzo, modo conversación") además de un botón en la interfaz nueva del punto 1; mantener "Cambio y fuera" tal cual lo propuso (encaja bien con el tono del proyecto) y usar "Pausa" para detener sin cerrar la sesión — quizás agregar "Anzo, continúa" o similar para reanudar desde pausa.
