@@ -42,8 +42,12 @@ Palabras clave activas: "Anzo", "Hola Anzo", "Yarvis"/"Jarvis", "Viernes" (refer
 - **Permisos acotados:** se quitó `acceptEdits` del `--permission-mode` (quedó vacío = modo Manual de la CLI). Con `--allowedTools mcp__browser` ya alcanza para lo que ANZO hace hoy; cualquier otra cosa (editar archivos, comandos de sistema) ahora queda bloqueada en vez de auto-aprobada.
 - Se borró `C:\dev\_ref\` (clones temporales de referencia, ya no se necesitaban).
 
+## Hito: login real y navegación confirmados (2026-09-27)
+
+El usuario inició sesión con sus credenciales reales de Indra en la ventana de Chrome dedicada, y Anzo pudo navegar por sus apps de Power Apps. Voz "Google" de Chrome confirmada como notablemente más natural que la de Windows. Con esto, todo el flujo (voz → Claude → navegador → sesión real → navegación) queda validado de punta a punta.
+
 ## Pendiente / mejoras futuras
 
-- Probar tareas reales de desarrollo/diagnóstico en Power Apps y Power Automate (hasta ahora solo se probó navegación) — es el objetivo real del proyecto y todavía no se ha ejercitado
+- Probar tareas reales de **desarrollo/diagnóstico** (editar un campo de una Canvas App, revisar el historial de un flujo de Power Automate, etc.) — la navegación ya funciona, pero esto sigue siendo lo no probado del objetivo original
 - El filtro de eco es una heurística de texto, no cancelación acústica real — usar audífonos sigue siendo lo más confiable si el falso-positivo persiste
-- Evaluar Fish Audio (de pago) si ni la voz de Windows ni la de Google de Chrome resultan suficientemente naturales
+- Evaluar Fish Audio (de pago) si la voz de Google de Chrome no resulta suficiente
