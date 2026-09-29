@@ -25,6 +25,7 @@ import mimetypes
 import os
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -306,11 +307,36 @@ def _stop(proc, name):
             proc.kill()
 
 
+def _wait_for_port(port, timeout_s, label):
+    """Poll until something accepts a TCP connection on 127.0.0.1:port, or
+    give up after timeout_s. Replaces a fixed time.sleep(2) that assumed
+    Chrome's devtools port (and, worse, Playwright MCP -- launched via
+    `npx @playwright/mcp@latest`, which can take much longer than 2s if it
+    needs to check for or download the package) would always be ready by
+    then. Confirmed live: it wasn't always, and the browser tool reported
+    "not connected" on the very first command after startup."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((HOST, port), timeout=1):
+                return True
+        except OSError:
+            time.sleep(0.3)
+    print(f"WARNING: {label} (port {port}) didn't respond within {timeout_s}s -- "
+          f"continuing anyway, but the browser tool may not work yet.")
+    return False
+
+
 def main():
     chrome_proc = start_chrome()
     if chrome_proc:
-        time.sleep(2)  # let Chrome's devtools port come up before Playwright MCP tries it
+        print("Esperando a que el puerto de depuracion de Chrome responda...")
+        _wait_for_port(CHROME_DEBUG_PORT, 20, "Chrome devtools")
     browser_mcp_proc = start_browser_mcp() if chrome_proc else None
+    if browser_mcp_proc:
+        print("Esperando a que el servidor de Playwright MCP responda "
+              "(la primera vez puede tardar mientras npx descarga el paquete)...")
+        _wait_for_port(BROWSER_MCP_PORT, 60, "Playwright MCP")
     threading.Thread(target=_summary_loop, daemon=True).start()
 
     # ThreadingHTTPServer's constructor already binds and listens, so the
