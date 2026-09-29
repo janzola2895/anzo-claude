@@ -308,20 +308,32 @@ def _stop(proc, name):
 
 
 def _wait_for_port(port, timeout_s, label):
-    """Poll until something accepts a TCP connection on 127.0.0.1:port, or
-    give up after timeout_s. Replaces a fixed time.sleep(2) that assumed
+    """Poll until something accepts a TCP connection on this port, or give
+    up after timeout_s. Replaces a fixed time.sleep(2) that assumed
     Chrome's devtools port (and, worse, Playwright MCP -- launched via
     `npx @playwright/mcp@latest`, which can take much longer than 2s if it
     needs to check for or download the package) would always be ready by
     then. Confirmed live: it wasn't always, and the browser tool reported
-    "not connected" on the very first command after startup."""
+    "not connected" on the very first command after startup.
+
+    Tries both 127.0.0.1 and localhost, not just HOST (127.0.0.1): also
+    confirmed live, Playwright MCP's own startup banner ("Listening on
+    http://localhost:8931") had already printed while a 127.0.0.1-only
+    check here kept failing to connect, so this sat out the full
+    timeout every time before falling through and continuing anyway --
+    it worked, but only after needlessly waiting the whole budget. On
+    this machine plain 127.0.0.1 and localhost apparently don't resolve
+    to the same thing for a fresh Node listener; trying both is cheap
+    and avoids needing to know which one will actually work."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        try:
-            with socket.create_connection((HOST, port), timeout=1):
-                return True
-        except OSError:
-            time.sleep(0.3)
+        for h in ("127.0.0.1", "localhost"):
+            try:
+                with socket.create_connection((h, port), timeout=1):
+                    return True
+            except OSError:
+                continue
+        time.sleep(0.3)
     print(f"WARNING: {label} (port {port}) didn't respond within {timeout_s}s -- "
           f"continuing anyway, but the browser tool may not work yet.")
     return False
