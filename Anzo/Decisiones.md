@@ -112,3 +112,13 @@ Reportado en vivo: el usuario ve la ventana de Chrome dedicada abrirse normalmen
 **Arreglo en `server.py`:** `_wait_for_port()` (nueva) reemplaza el `sleep(2)` fijo por un polling real — espera hasta 20s a que el puerto de depuración de Chrome (9223) responda antes de lanzar Playwright MCP, y hasta 60s a que Playwright MCP (8931) responda antes de abrir la interfaz de voz. Si algo no responde a tiempo, avisa por consola en vez de fallar en silencio.
 
 **Primera vuelta de este arreglo, probada en vivo:** sí abrió, pero tardó el minuto entero. La consola mostraba a Playwright MCP con su propio banner ("Listening on http://localhost:8931") bastante antes de que la interfaz de voz apareciera — `_wait_for_port()` solo probaba conectarse a `127.0.0.1`, no a `localhost`, y en esta máquina esos dos no resuelven igual para un listener de Node recién levantado. Se agotaba el timeout de 60s completo cada vez antes de rendirse y seguir igual. Arreglo: prueba ambos hosts (`127.0.0.1` y `localhost`) en cada intento de poll. Probado en aislado: detecta rápido un listener en cualquiera de los dos.
+
+## Hito: flujo de punta a punta confirmado sano de nuevo (2026-09-29)
+
+Con los cuatro arreglos de esta sección (eco por hueco de estado, eco por puntuación entre oraciones, espera fija de arranque, `127.0.0.1` vs `localhost`), el usuario confirmó que corriendo `python server.py` normal el flujo completo (voz → Claude → navegador → TradingView/Power Apps → voz de vuelta) ya funciona de punta a punta sin el auto-eco ni el error de conexión del navegador. Todo comiteado y subido a `origin/master` (`janzola2895/anzo`, privado) en cada paso — nada quedó pendiente de subir.
+
+**Lo que sigue sin confirmarse en vivo** (no se tocó en esta ronda de pruebas):
+- Modo conversación y "pausa"/"cambio y fuera" dichos por voz real (el toggle por botón sí se probó, ver sección de UI/autostart/bitácora más arriba)
+- La bitácora escribiendo de verdad en `Anzo/Bitacora/` después de una conversación real
+- La tarea programada arrancando sola en un inicio de sesión real de Windows (sigue como pendiente más abajo)
+- Tareas reales de desarrollo/diagnóstico de Power Platform (Canvas Apps / Power Automate) — sigue siendo lo no probado del objetivo original, ver "Pendiente"
