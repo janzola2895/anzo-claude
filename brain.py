@@ -11,6 +11,14 @@ Pattern verified against two working reference projects (ethanplusai/jarvis,
 Itsme23476/jarvis-claude-code) before writing this from scratch. See
 Anzo/Decisiones.md for why.
 
+Router (claude-code-router, https://github.com/musistudio/claude-code-router):
+optional local gateway that lets the same `claude` CLI talk to other
+providers/accounts (OpenRouter, DeepSeek, Gemini, a second Anthropic key...)
+so ANZO doesn't depend only on this account's subscription limits. See
+ANZO_ROUTER below. The default keeps the exact subscription-only behavior
+described above; the router is strictly opt-in, and only the *routed* child
+process ever gets ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN.
+
 Windows note: `claude` is installed as a `claude.cmd` shim (npm global
 install), not a bare .exe. `subprocess.Popen([...], shell=False)` cannot
 launch a .cmd directly on Windows and fails with WinError 2/193 depending
@@ -24,7 +32,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -41,6 +51,35 @@ SCRUBBED_ENV_PREFIXES = ("CLAUDE_CODE_", "ANTHROPIC_")
 SCRUBBED_ENV_KEYS = {"CLAUDECODE"}
 
 MODEL = os.environ.get("ANZO_MODEL", "").strip()
+
+# --- claude-code-router integration -------------------------------------
+# ANZO_ROUTER:
+#   off      (default) subscription only, exactly as before.
+#   fallback use the subscription first; when it reports a usage/rate limit,
+#            transparently retry the same turn through the router.
+#   always   send every turn through the router (subscription untouched).
+ROUTER_MODE = os.environ.get("ANZO_ROUTER", "off").strip().lower()
+if ROUTER_MODE not in ("off", "fallback", "always"):
+    ROUTER_MODE = "off"
+ROUTER_HOST = os.environ.get("ANZO_ROUTER_HOST", "127.0.0.1").strip()
+ROUTER_PORT = int(os.environ.get("ANZO_ROUTER_PORT", "3456"))
+ROUTER_URL = os.environ.get("ANZO_ROUTER_URL", "").strip() or f"http://{ROUTER_HOST}:{ROUTER_PORT}"
+# A CCR client key (created on the router's "API Keys" page). Never logged.
+ROUTER_KEY = os.environ.get("ANZO_ROUTER_KEY", "").strip()
+# Model as the router names it (e.g. "openrouter,deepseek/deepseek-chat" or a
+# tier alias). Empty = let the router's default/routing rules decide.
+ROUTER_MODEL = os.environ.get("ANZO_ROUTER_MODEL", "").strip()
+
+# Phrases the CLI prints when the plan/API runs out ("You've hit your weekly
+# limit · resets 11pm", "Claude usage limit reached", 429s...). Only applied to
+# SHORT messages: a normal answer that merely talks about rate limits must not
+# trigger a fallback.
+_LIMIT_RE = re.compile(
+    r"hit your .{0,30}limit|usage limit|limit reached|rate.?limit|"
+    r"credit balance|out of (?:extra )?usage|\b429\b|overloaded",
+    re.IGNORECASE,
+)
+_LIMIT_MAX_LEN = 300
 # Empty by default (falls back to the CLI's own "Manual" mode) rather than
 # "acceptEdits": ANZO's whole job right now is browser control via
 # --allowedTools mcp__browser below, not local file edits. acceptEdits also
@@ -90,13 +129,45 @@ _active_lock = threading.Lock()
 _active_proc: subprocess.Popen | None = None
 
 
-def child_env() -> dict:
-    """Copy of the environment with anything that would redirect billing removed."""
-    return {
+def child_env(routed: bool = False) -> dict:
+    """Copy of the environment with anything that would redirect billing removed.
+
+    routed=True is the one deliberate exception: the child is pointed at the
+    local claude-code-router gateway instead of Anthropic. It gets *only* the
+    gateway URL and the router's client key -- never an ambient
+    ANTHROPIC_API_KEY, and the non-routed path above is untouched, so a
+    subscription turn can never accidentally leak onto the router (or vice
+    versa)."""
+    env = {
         k: v
         for k, v in os.environ.items()
         if not k.startswith(SCRUBBED_ENV_PREFIXES) and k not in SCRUBBED_ENV_KEYS
     }
+    if routed:
+        env["ANTHROPIC_BASE_URL"] = ROUTER_URL
+        # The CLI refuses to run without *some* credential once a base URL is
+        # set; if the router has no client-key enforcement any placeholder works.
+        env["ANTHROPIC_AUTH_TOKEN"] = ROUTER_KEY or "anzo-local-router"
+    return env
+
+
+def router_reachable() -> bool:
+    """True if the router's gateway port accepts a TCP connection right now."""
+    try:
+        from urllib.parse import urlparse
+        u = urlparse(ROUTER_URL)
+        host = u.hostname or ROUTER_HOST
+        port = u.port or (443 if u.scheme == "https" else 80)
+        with socket.create_connection((host, port), timeout=1.5):
+            return True
+    except OSError:
+        return False
+
+
+def is_limit_error(text) -> bool:
+    """Does this message look like 'you ran out of tokens/quota'?"""
+    text = (text or "").strip()
+    return bool(text) and len(text) <= _LIMIT_MAX_LEN and bool(_LIMIT_RE.search(text))
 
 
 def _valid_session(sid) -> bool:
@@ -120,7 +191,7 @@ def _resolve_claude() -> str:
     )
 
 
-def build_command(message: str, session_id: str | None = None) -> list[str]:
+def build_command(message: str, session_id: str | None = None, routed: bool = False) -> list[str]:
     cmd = [
         _resolve_claude(),
         "-p", message,
@@ -130,8 +201,9 @@ def build_command(message: str, session_id: str | None = None) -> list[str]:
     ]
     if _valid_session(session_id):
         cmd += ["--resume", str(session_id)]
-    if MODEL:
-        cmd += ["--model", MODEL]
+    model = (ROUTER_MODEL if routed else "") or MODEL
+    if model:
+        cmd += ["--model", model]
     if PERMISSION_MODE:
         cmd += ["--permission-mode", PERMISSION_MODE]
     if MCP_CONFIG_PATH:
@@ -166,8 +238,12 @@ def cancel_active() -> bool:
         return False
 
 
-def run(message: str, session_id: str | None = None):
-    """Generator yielding dicts describing what Claude is doing, as it happens:
+def _run_once(message: str, session_id: str | None = None, routed: bool = False):
+    """One attempt at a turn (subscription, or via the router if routed=True).
+    Same events as run(), plus {t: "limit", message} when the account/provider
+    is out of quota -- emitted INSTEAD of the error/text so run() can decide
+    whether to retry through the router. Generator yielding dicts describing
+    what Claude is doing, as it happens:
     {t: "status", model, tools, mcp}
     {t: "delta", text}                    -- streamed narration text
     {t: "tool", phase: "use"/"result", name, input?, ok?}
@@ -178,8 +254,8 @@ def run(message: str, session_id: str | None = None):
     """
     global _active_proc
 
-    cmd = build_command(message, session_id)
-    env = child_env()
+    cmd = build_command(message, session_id, routed)
+    env = child_env(routed)
 
     popen_kwargs = dict(
         cwd=WORKDIR,
@@ -318,6 +394,11 @@ def run(message: str, session_id: str | None = None):
             if kind == "assistant":
                 for block in (ev.get("message") or {}).get("content") or []:
                     btype = block.get("type")
+                    if (btype == "text" and not text_seen and is_limit_error(block.get("text"))):
+                        # Quota message arrives as a synthetic assistant turn.
+                        proc.terminate()
+                        yield dict(t="limit", message=block["text"].strip())
+                        return
                     if btype == "text" and not streamed_text and block.get("text"):
                         text_seen = True
                         yield dict(t="delta", text=block["text"])
@@ -336,6 +417,9 @@ def run(message: str, session_id: str | None = None):
 
             if kind == "result":
                 usage = ev.get("usage") or {}
+                if not text_seen and is_limit_error(ev.get("result")):
+                    yield dict(t="limit", message=str(ev["result"]).strip())
+                    return
                 if ev.get("subtype") != "success" and not text_seen:
                     yield dict(t="error", message=str(ev.get("result") or "claude returned an error")[:400])
                     return
@@ -368,7 +452,11 @@ def run(message: str, session_id: str | None = None):
             if was_ours:
                 yield dict(t="interrupted")
             else:
-                yield dict(t="error", message=(" | ".join(list(err_buf)[-6:])
+                err_text = " | ".join(list(err_buf)[-6:])
+                if not text_seen and any(is_limit_error(l) for l in err_buf):
+                    yield dict(t="limit", message=err_text[:_LIMIT_MAX_LEN])
+                    return
+                yield dict(t="error", message=(err_text
                                                or f"claude exited with code {rc}")[:500])
             return
         yield dict(t="complete", session_id=emitted_session,
@@ -379,6 +467,53 @@ def run(message: str, session_id: str | None = None):
         with _active_lock:
             if _active_proc is proc:
                 _active_proc = None
+
+
+def run(message: str, session_id: str | None = None):
+    """Public entry point: same events as _run_once(), with router policy.
+
+    off      -> subscription only (a limit surfaces as a normal error).
+    always   -> router only.
+    fallback -> subscription first; on a quota limit, retry once via router.
+    """
+    if ROUTER_MODE == "always":
+        if not router_reachable():
+            yield dict(t="error", message=(
+                f"claude-code-router no responde en {ROUTER_URL}. "
+                "Arrancalo (ccr start) o pon ANZO_ROUTER=off."))
+            return
+        yield from _finish(_run_once(message, session_id, routed=True), routed=True)
+        return
+
+    first = _run_once(message, session_id, routed=False)
+    for ev in first:
+        if ev.get("t") != "limit":
+            yield ev
+            continue
+        if ROUTER_MODE != "fallback":
+            yield dict(t="error", message=ev["message"][:400])
+            return
+        if not router_reachable():
+            yield dict(t="error", message=(
+                ev["message"] + " | Ademas claude-code-router no responde en "
+                f"{ROUTER_URL}, asi que no hay respaldo.")[:400])
+            return
+        yield dict(t="warning", message=(
+            "Se acabo el limite de la suscripcion; continuo con el router "
+            "(otro proveedor)."))
+        yield from _finish(_run_once(message, session_id, routed=True), routed=True)
+        return
+
+
+def _finish(events, routed: bool):
+    """Pass events through; a limit hit while already routed is a plain error
+    (no further fallback -- there's nothing left to fall back to)."""
+    for ev in events:
+        if ev.get("t") == "limit":
+            yield dict(t="error", message=("El router tambien devolvio un limite: "
+                                           + ev["message"])[:400])
+            return
+        yield ev
 
 
 def summarize(exchanges: list[tuple[str, str]]) -> str:
@@ -412,19 +547,32 @@ def summarize(exchanges: list[tuple[str, str]]) -> str:
         "conversacion entre el usuario y ANZO (un asistente de voz). Texto "
         "plano, sin markdown ni listas.\n\n" + transcript
     )
-    cmd = [_resolve_claude(), "-p", "--tools", ""]
-    if MODEL:
-        cmd += ["--model", MODEL]
-    popen_kwargs = dict(
-        cwd=tempfile.gettempdir(), text=True, encoding="utf-8", errors="replace",
-        capture_output=True, env=child_env(), input=prompt,
-    )
-    if IS_WINDOWS:
-        popen_kwargs["shell"] = True
-    try:
-        result = subprocess.run(cmd, timeout=60, **popen_kwargs)
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return ""
-    if result.returncode != 0:
-        return ""
-    return result.stdout.strip()
+    def attempt(routed: bool) -> str | None:
+        cmd = [_resolve_claude(), "-p", "--tools", ""]
+        model = (ROUTER_MODEL if routed else "") or MODEL
+        if model:
+            cmd += ["--model", model]
+        popen_kwargs = dict(
+            cwd=tempfile.gettempdir(), text=True, encoding="utf-8", errors="replace",
+            capture_output=True, env=child_env(routed), input=prompt,
+        )
+        if IS_WINDOWS:
+            popen_kwargs["shell"] = True
+        try:
+            result = subprocess.run(cmd, timeout=60, **popen_kwargs)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return None
+        out = result.stdout.strip()
+        if result.returncode != 0 or is_limit_error(out):
+            return None
+        return out
+
+    # Summaries are background housekeeping: when a router is configured,
+    # spend the router's tokens on them rather than the subscription's.
+    if ROUTER_MODE == "always" or (ROUTER_MODE == "fallback" and router_reachable()):
+        routed_out = attempt(True) if router_reachable() else None
+        if routed_out:
+            return routed_out
+        if ROUTER_MODE == "always":
+            return ""
+    return attempt(False) or ""
