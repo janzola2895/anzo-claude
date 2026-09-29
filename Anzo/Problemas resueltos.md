@@ -49,6 +49,24 @@ Este fue el más largo de resolver, con varias causas distintas superpuestas:
 
 De paso, esto también explicaba unos `ConnectionAbortedError` sueltos en la consola: eran la conexión SSE de esa misma pestaña cortándose cuando Claude la navegó a otro lado a mitad de la petición — no un problema aparte.
 
+## Anzo se queda "pensando" cuando va por el router (CCR)
+
+**Síntoma:** después de llegar al límite de la suscripción, cualquier pedido dejaba a Anzo "pensando" sin responder, y aparecían varios `claude.exe` colgados con conexiones abiertas al puerto 3456.
+
+**Causa:** Anzo pasó al router y el único proveedor de CCR, Codex en plan gratis, devolvía `429 usage_limit_reached` (cupo agotado ~14 días). La CLI reintenta los 429 en silencio, así que no salía texto hasta el timeout de 180s. El log de CCR (UI → Logs, o `request-logs.sqlite`) mostraba la respuesta 429 de `chatgpt.com/backend-api/codex/responses` una y otra vez. No había respaldo porque CCR tenía un solo proveedor.
+
+**Arreglo:** proveedor Gemini (`gemini-3.8-flash`) + regla en Global Routing que lo hace principal y deja a Codex de respaldo. Detalle en `Decisiones.md`, sección "CCR probado en vivo".
+
+**Cómo diagnosticarlo la próxima vez:** revisar primero **Logs** en la UI de CCR (código de estado y proveedor resuelto) antes de tocar `brain.py`.
+
+## Gemini da 401 con la clave nueva de AI Studio (`AQ.…`)
+
+**Síntoma:** `Start check` en CCR fallaba con "API keys are not supported by this API. Expected OAuth2 access token".
+
+**Causa:** las claves nuevas de AI Studio empiezan con `AQ.`, no `AIza`. CCR 3.1.1 solo reconocía `AIza` y a las demás les mandaba también `Authorization: Bearer`, que Google rechaza junto con `x-goog-api-key`. Otras pistas que confundieron: una clave creada en un proyecto viejo de Google Cloud falló, la de un proyecto nuevo funcionó; y probar contra Vertex (`aiplatform.googleapis.com`) da 403 porque esa API está desactivada, no hace falta activarla.
+
+**Arreglo:** parche local a dos archivos de CCR (ver `Decisiones.md`). Al probar una clave a mano, pegarla cuando `Read-Host` la pida, no dentro del texto del comando.
+
 ## Otras notas sueltas
 
 - La CLI de `claude` no viene con la app de escritorio — hay que instalarla aparte (`npm install -g @anthropic-ai/claude-code`) y loguearla una vez.

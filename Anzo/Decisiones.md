@@ -88,6 +88,10 @@ Implementados los 4 pedidos priorizados de la lista de pendientes anterior. El p
 - Probar en vivo que la tarea programada arranca sola en el próximo inicio de sesión de Windows (quedó verificada como registrada y `Ready`, pero no probada con un logon real todavía)
 - Si la pestaña de la interfaz de voz queda minimizada/en segundo plano por un rato largo, Chrome puede retrasar temporizadores (`setTimeout`) del propio `app.js` — confirmado en pruebas que esto puede demorar mucho la recuperación de `inEchoWindow` (ver bug de abajo). En uso normal la pestaña suele quedar visible, pero si Anzo deja de reaccionar después de estar mucho tiempo sin usarse, esta es la primera sospechosa
 
+- **Fallo rápido con el router:** hacer que Anzo avise de inmediato cuando un proveedor del router devuelve un límite (429), en vez de esperar el timeout de 180s. Pendiente de implementar en `brain.py`; solo hace falta si vuelve a pasar
+- **Reaplicar el parche de CCR** para claves `AQ.` si se actualiza CCR con npm (ver "CCR probado en vivo") y Gemini vuelve a dar 401; o revisar si una versión nueva de CCR ya lo trae corregido
+- Cuando se reinicie el cupo de Codex (~2026-10-13) revisar si conviene dejarlo como respaldo o quitarlo de la regla
+
 ## Cambio de diseño: modo normal ya no tiene ventana de gracia (2026-09-29)
 
 El usuario reportó que en modo normal (no modo conversación) Anzo a veces seguía reaccionando sin que dijera la palabra clave. Causa: después de cada turno, `finishTurn()` dejaba a Anzo en `LISTENING` (sin pedir "Anzo") durante 12 segundos de gracia (`FOLLOW_UP_WINDOW_MS`) antes de volver a `IDLE` -- pensado originalmente para responder una pregunta rápido, pero era también una ventana donde cualquier habla suelta (o un eco que el filtro no cachara) se tomaba como instrucción nueva sin que el usuario lo pidiera.
@@ -154,4 +158,19 @@ set ANZO_ROUTER_MODEL=<modelo tal como lo nombra CCR>   # opcional
 ```
 `server.py` corre `ccr start --no-open` al arrancar si el modo no es `off`. Otras variables: `ANZO_ROUTER_URL`, `ANZO_ROUTER_HOST`, `ANZO_ROUTER_PORT`.
 
-**Limitaciones conocidas (sin verificar contra un router real todavía):** la lógica se probó con una CLI simulada, no con CCR corriendo. Un turno reintentado por el router hace `--resume` de una sesión creada con Claude; si el modelo del proveedor rechaza ese historial, habrá que reintentar sin `--resume`. Modelos que no son de Anthropic pueden manejar peor las herramientas `mcp__browser`.
+**Limitaciones conocidas:** un turno reintentado por el router hace `--resume` de una sesión creada con Claude; si el modelo del proveedor rechaza ese historial, habrá que reintentar sin `--resume`. Modelos que no son de Anthropic pueden manejar peor las herramientas `mcp__browser`. (La duda de si funcionaba contra un CCR real quedó cerrada el mismo día, ver la sección siguiente.)
+
+## CCR probado en vivo: Gemini como principal (2026-09-29)
+
+**Qué pasó:** con CCR real, el único proveedor era Codex (`gpt-5.6-terra`, plan gratis de ChatGPT), que devolvía `429 usage_limit_reached` hasta cerca del 2026-10-13. La CLI `claude` reintenta los 429 en silencio, así que Anzo se quedaba "pensando" hasta el timeout de inactividad (180s). No cambiaba de modelo solo porque Anzo solo tiene un salto (suscripción → router) y CCR tenía un único proveedor sin cadena de respaldo. Los `git checkout`/`pull` que el usuario corrió antes no tuvieron nada que ver.
+
+**Decisión:** no cambiar de router (LiteLLM, OpenRouter y demás también necesitan un proveedor con cupo detrás; Ollama local no sirve en este equipo, 15 GB de RAM y sin GPU; Groq gratis tiene un tope por minuto menor que el prompt de Anzo, ~30k tokens por petición). Se agregó **una sola** clave gratis, de Google AI Studio.
+
+**Configuración final (en la UI de CCR, `http://127.0.0.1:3458`):**
+- Proveedor Google Gemini, modelo `gemini-3.8-flash`. `gemini-2.5-flash` ya no está disponible para cuentas nuevas.
+- Global Routing, regla "Todo a Gemini": condición `request.body.model != nada` (siempre verdadera), reescribe `request.body.model = gemini-3.8-flash`, y en fallo va a Codex `gpt-5.6-terra`.
+- Probado por el usuario: Anzo responde de punta a punta por Gemini.
+
+**Parche local a CCR 3.1.1 (importante):** las claves nuevas de AI Studio empiezan con `AQ.`, no `AIza`. CCR solo trataba `AIza` como clave de Gemini y a las demás les agregaba `Authorization: Bearer` además de `x-goog-api-key`; Google rechaza las dos credenciales juntas (401). Se parcheó `%APPDATA%\npm\node_modules\@musistudio\claude-code-router\dist\main\cli.js` y `upstream-header-sanitizer.js` para tratar `AIza` y `AQ.` igual. Hay copias `*.bak-anzo` al lado. **Una actualización de CCR con npm borra el parche.**
+
+**Sin resolver a propósito:** si un proveedor devuelve un límite mientras Anzo va por el router, la CLI sigue reintentando en silencio y Anzo puede volver a quedarse "pensando" en vez de avisar. Con el respaldo de CCR es menos probable, así que no se tocó `brain.py`.
