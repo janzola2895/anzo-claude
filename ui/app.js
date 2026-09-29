@@ -116,9 +116,21 @@ const ECHO_GRACE_MS = 1200; // trailing audio / mic lag after the last utterance
 const FALLBACK_MS_PER_CHAR = 70;
 const FALLBACK_MIN_MS = 3000;
 
+// normalize() only strips accents/case -- flushSentence() speaks one
+// sentence per speak() call, so a short reply is often two or three
+// separate utterances back to back, and speech RECOGNITION frequently
+// hears them as a single continuous utterance spanning that boundary
+// (confirmed live: "...graficos En que te ayudo" heard as one chunk).
+// recentlySpoken still has the sentence's punctuation ("graficos. ¿En"),
+// so a punctuation-free substring match across that boundary silently
+// failed. Stripping punctuation on both sides fixes that.
+function normalizeForEcho(text) {
+  return normalize(text).replace(/[.,!?¿¡:;"'()\-–—]/g, " ").replace(/\s+/g, " ").trim();
+}
+
 function looksLikeEcho(heard) {
   if (!inEchoWindow) return false;
-  const n = normalize(heard).trim();
+  const n = normalizeForEcho(heard);
   if (n.length < 4) return false; // too short to judge either way
   return recentlySpoken.includes(n);
 }
@@ -126,7 +138,7 @@ function looksLikeEcho(heard) {
 function speak(rawText) {
   const text = stripMarkdown(rawText);
   if (!text.trim() || !window.speechSynthesis) return;
-  recentlySpoken = (recentlySpoken + " " + normalize(text)).slice(-500);
+  recentlySpoken = (recentlySpoken + " " + normalizeForEcho(text)).slice(-500);
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "es-CO";
   if (spanishVoice) u.voice = spanishVoice;
