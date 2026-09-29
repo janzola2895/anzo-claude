@@ -6,9 +6,9 @@
    restarts it unless we deliberately called stop(). */
 
 const TOKEN = window.ANZO_TOKEN;
-const orb = document.getElementById("orb");
 const statusEl = document.getElementById("status");
 const logEl = document.getElementById("log");
+const convButton = document.getElementById("conv-toggle");
 
 const State = { IDLE: "idle", LISTENING: "listening", WORKING: "working" };
 let state = State.IDLE;
@@ -16,8 +16,16 @@ let sessionId = null;
 let eventSource = null;
 let sentenceBuffer = "";
 let wantRecognition = true;
+// "Modo conversación": once on, ANZO keeps listening without the wake word
+// until "pausa" or "cambio y fuera" -- see setConversationMode().
+let conversationMode = false;
+let convPaused = false;
 
-function setOrb(cls) { orb.className = cls; }
+// The visual orb now lives in orb.js (Three.js) and exposes itself on
+// window so this plain script doesn't need to become a module. Guarded in
+// case the CDN fails to load: the voice/browser pipeline must keep working
+// even if the decorative orb doesn't.
+function setOrb(cls) { if (window.setOrbState) window.setOrbState(cls); }
 function setStatus(text) { statusEl.textContent = text; }
 function logLine(cls, text) {
   const div = document.createElement("div");
@@ -165,7 +173,9 @@ function startTurn(message) {
         sessionId = ev.session_id || sessionId;
         flushSentence(true);
         if (replyBuffer.trim()) logLine("anzo", "Anzo: " + replyBuffer.trim());
-        finishTurn("Puedes responder directamente, o di \"Anzo\" para algo nuevo");
+        finishTurn(conversationMode
+          ? "Te escucho…"
+          : "Puedes responder directamente, o di \"Anzo\" para algo nuevo");
         break;
       case "interrupted":
         finishTurn("Interrumpido. Puedes seguir hablando");
@@ -196,6 +206,7 @@ function finishTurn(statusText) {
   setOrb("listening");
   setStatus(statusText);
   clearTimeout(listeningTimeout);
+  if (conversationMode) return; // stays LISTENING indefinitely -- see setConversationMode()
   listeningTimeout = setTimeout(() => {
     if (state === State.LISTENING) {
       state = State.IDLE;
@@ -205,13 +216,88 @@ function finishTurn(statusText) {
   }, FOLLOW_UP_WINDOW_MS);
 }
 
+// Matches a whole utterance (ignoring accents/case/trailing punctuation)
+// against one or more control phrases, e.g. isPhrase(text, "pausa").
+function isPhrase(text, ...variants) {
+  const n = normalize(text).trim().replace(/[.,!?¿¡]+$/, "");
+  return variants.includes(n);
+}
+
+function updateConvButton() {
+  if (!convButton) return;
+  convButton.textContent = conversationMode ? "Modo conversación: ON" : "Modo conversación: OFF";
+  convButton.setAttribute("aria-pressed", String(conversationMode));
+}
+
+// Modo conversación: once activated, the follow-up window (finishTurn,
+// above) never expires back to IDLE, so ANZO keeps listening without
+// needing the wake word again -- until "cambio y fuera" ends it, or
+// "pausa" holds it without ending the session (see setConvPaused).
+function setConversationMode(on) {
+  conversationMode = on;
+  convPaused = false;
+  updateConvButton();
+  clearTimeout(listeningTimeout);
+  if (on) {
+    if (state !== State.WORKING) { state = State.LISTENING; setOrb("listening"); }
+    setStatus("Modo conversación activo. Di \"pausa\" o \"cambio y fuera\" cuando quieras.");
+    speak("Modo conversación activado.");
+  } else {
+    state = State.IDLE;
+    setOrb("idle");
+    setStatus("Di \"Anzo\" para empezar");
+    speak("Cambio y fuera.");
+  }
+}
+
+function setConvPaused(on) {
+  convPaused = on;
+  setStatus(on ? "En pausa. Di \"continúa\" para seguir." : "Te escucho…");
+  speak(on ? "En pausa." : "Seguimos.");
+}
+
+function toggleConversationModeFromUI() {
+  if (state === State.WORKING) return;
+  setConversationMode(!conversationMode);
+}
+
 function onFinalUtterance(text) {
   if (!text.trim()) return;
 
+  // Paused inside conversation mode: ignore everything except the phrase
+  // that wakes it back up (no wake word needed, same as the rest of
+  // conversation mode).
+  if (conversationMode && convPaused) {
+    if (isPhrase(text, "continua", "anzo continua", "sigamos", "sigue")) setConvPaused(false);
+    return;
+  }
+
   if (state === State.WORKING) {
     if (looksLikeEcho(text)) return; // Anzo's own voice bleeding into the mic, not a real interrupt
+    if (conversationMode && isPhrase(text, "pausa")) {
+      interruptCurrentTurn();
+      finishTurn("En pausa.");
+      setConvPaused(true);
+      return;
+    }
+    if (conversationMode && isPhrase(text, "cambio y fuera")) {
+      interruptCurrentTurn();
+      finishTurn("Cambio y fuera.");
+      setConversationMode(false);
+      return;
+    }
     // Any other speech while a turn is running is an interrupt: stop it
     // and treat this utterance as the new instruction, same session.
+    startTurn(text);
+    return;
+  }
+
+  if (conversationMode) {
+    // Behaves like an indefinitely-extended LISTENING state: no wake word
+    // needed, and the control phrases are always checked first so they
+    // never get sent to Claude as a regular instruction.
+    if (isPhrase(text, "cambio y fuera")) { setConversationMode(false); return; }
+    if (isPhrase(text, "pausa")) { setConvPaused(true); return; }
     startTurn(text);
     return;
   }
@@ -219,7 +305,11 @@ function onFinalUtterance(text) {
   if (state === State.IDLE) {
     const rest = stripWakeWord(text);
     if (rest === null) return; // no wake word heard, ignore
-    if (rest) { startTurn(rest); return; }
+    if (rest) {
+      if (isPhrase(rest, "modo conversacion", "activa modo conversacion")) { setConversationMode(true); return; }
+      startTurn(rest);
+      return;
+    }
     state = State.LISTENING;
     setOrb("listening");
     setStatus("Te escucho…");
@@ -227,6 +317,7 @@ function onFinalUtterance(text) {
   }
 
   if (state === State.LISTENING) {
+    if (isPhrase(text, "modo conversacion", "activa modo conversacion")) { setConversationMode(true); return; }
     startTurn(text);
     return;
   }
@@ -266,5 +357,6 @@ function setupRecognition() {
 
 window.addEventListener("DOMContentLoaded", () => {
   if (!TOKEN) { setStatus("Falta el token — recarga la página."); return; }
+  if (convButton) convButton.addEventListener("click", toggleConversationModeFromUI);
   setupRecognition();
 });

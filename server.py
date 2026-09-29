@@ -19,6 +19,7 @@ own browser tab.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import mimetypes
 import os
@@ -26,6 +27,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -42,6 +44,13 @@ ALLOWED_ORIGIN = f"http://{HOST}:{PORT}"
 BROWSER_MCP_PORT = int(os.environ.get("ANZO_BROWSER_MCP_PORT", "8931"))
 CHROME_DEBUG_PORT = int(os.environ.get("ANZO_CHROME_DEBUG_PORT", "9223"))
 PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".browser-profile")
+
+# Bitacora: a running log of what's been said, summarized -- not transcribed
+# raw -- so it stays short and doesn't multiply claude -p calls against the
+# weekly usage limit. See record_exchange()/_summary_loop() below.
+BITACORA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Anzo", "Bitacora")
+IDLE_SUMMARY_GAP_S = int(os.environ.get("ANZO_IDLE_SUMMARY_GAP", "600"))
+SUMMARY_CHECK_INTERVAL_S = 120
 
 CHROME_PATHS = [
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -114,6 +123,56 @@ def start_browser_mcp():
     print(f"Starting browser MCP server on port {BROWSER_MCP_PORT}, "
           f"attaching to Chrome via CDP — first launch downloads the package, give it a moment.")
     return proc
+
+
+_exchange_lock = threading.Lock()
+_pending_exchanges = []  # [(user_text, anzo_text), ...] since the last summary
+_last_activity = time.monotonic()
+
+
+def record_exchange(user_text: str, anzo_text: str):
+    """Called once a turn completes successfully (see _handle_stream) --
+    skipped for errored/interrupted turns so the summary reflects what
+    actually got said, not aborted attempts."""
+    global _last_activity
+    anzo_text = anzo_text.strip()
+    if not anzo_text:
+        return
+    with _exchange_lock:
+        _pending_exchanges.append((user_text, anzo_text))
+        _last_activity = time.monotonic()
+
+
+def _write_summary(exchanges):
+    summary = brain.summarize(exchanges)
+    if not summary:
+        return  # best-effort: a failed/empty summarize() just skips this round
+    os.makedirs(BITACORA_DIR, exist_ok=True)
+    today = datetime.date.today().isoformat()
+    path = os.path.join(BITACORA_DIR, f"{today}.md")
+    is_new = not os.path.exists(path)
+    stamp = datetime.datetime.now().strftime("%H:%M")
+    with open(path, "a", encoding="utf-8") as f:
+        if is_new:
+            f.write(f"# {today}\n\n")
+        f.write(f"## {stamp}\n\n{summary}\n\n")
+
+
+def _maybe_flush_summary(force=False):
+    with _exchange_lock:
+        if not _pending_exchanges:
+            return
+        if not force and (time.monotonic() - _last_activity) < IDLE_SUMMARY_GAP_S:
+            return
+        exchanges = list(_pending_exchanges)
+        _pending_exchanges.clear()
+    _write_summary(exchanges)
+
+
+def _summary_loop():
+    while True:
+        time.sleep(SUMMARY_CHECK_INTERVAL_S)
+        _maybe_flush_summary()
 
 
 class Server(ThreadingHTTPServer):
@@ -209,11 +268,16 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "keep-alive")
         self.end_headers()
 
+        reply_parts = []
         try:
             for ev in brain.run(message, session_id):
                 line = f"data: {json.dumps(ev)}\n\n".encode("utf-8")
                 self.wfile.write(line)
                 self.wfile.flush()
+                if ev.get("t") == "delta":
+                    reply_parts.append(ev.get("text") or "")
+                elif ev.get("t") == "complete":
+                    record_exchange(message, "".join(reply_parts))
                 if ev.get("t") in ("complete", "error", "interrupted"):
                     break
         except (BrokenPipeError, ConnectionAbortedError):
@@ -247,6 +311,7 @@ def main():
     if chrome_proc:
         time.sleep(2)  # let Chrome's devtools port come up before Playwright MCP tries it
     browser_mcp_proc = start_browser_mcp() if chrome_proc else None
+    threading.Thread(target=_summary_loop, daemon=True).start()
 
     # ThreadingHTTPServer's constructor already binds and listens, so the
     # page is reachable immediately even though serve_forever() hasn't
@@ -272,6 +337,7 @@ def main():
         server.server_close()
         _stop(browser_mcp_proc, "browser MCP")
         _stop(chrome_proc, "Chrome")
+        _maybe_flush_summary(force=True)
 
 
 if __name__ == "__main__":

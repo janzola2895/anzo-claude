@@ -27,6 +27,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -378,3 +379,52 @@ def run(message: str, session_id: str | None = None):
         with _active_lock:
             if _active_proc is proc:
                 _active_proc = None
+
+
+def summarize(exchanges: list[tuple[str, str]]) -> str:
+    """One-shot, non-streaming claude -p call that condenses a list of
+    (user_message, anzo_reply) pairs into a short Spanish summary for
+    Anzo/Bitacora/. No browser/MCP tools: --tools "" disables the built-in
+    set entirely (stronger than just not pre-approving them, since this call
+    has no legitimate use for any tool) and --mcp-config isn't passed at
+    all. Deliberately not run after every turn -- server.py only calls this
+    on an idle gap or clean shutdown, so it doesn't multiply usage against
+    the same weekly limit the interactive turns already spend from.
+
+    Runs from a neutral temp directory, NOT WORKDIR: cwd=C:\\dev\\anzo (used
+    by run(), to find .claude/skills/) also auto-loads this project's own
+    Claude Code memory/CLAUDE.md -- confirmed live, it made a test summary
+    talk about the ANZO project itself instead of the sample exchange. This
+    call needs zero project context, so it just avoids the directory that
+    triggers it instead of fighting it with more flags (--bare would also
+    dodge it, but breaks subscription auth -- never use --bare here).
+
+    The prompt is piped via stdin, NOT passed as the -p positional argument:
+    confirmed live that a multi-line argument gets silently truncated at the
+    first newline when routed through cmd.exe (shell=True, needed for the
+    claude.cmd shim -- see module docstring). Piping sidesteps that
+    entirely; `claude -p` (no prompt arg) reads the message from stdin."""
+    if not exchanges:
+        return ""
+    transcript = "\n\n".join(f"Usuario: {u}\nAnzo: {a}" for u, a in exchanges)
+    prompt = (
+        "Resumi en espanol, en 2 a 4 frases cortas, de que trato esta "
+        "conversacion entre el usuario y ANZO (un asistente de voz). Texto "
+        "plano, sin markdown ni listas.\n\n" + transcript
+    )
+    cmd = [_resolve_claude(), "-p", "--tools", ""]
+    if MODEL:
+        cmd += ["--model", MODEL]
+    popen_kwargs = dict(
+        cwd=tempfile.gettempdir(), text=True, encoding="utf-8", errors="replace",
+        capture_output=True, env=child_env(), input=prompt,
+    )
+    if IS_WINDOWS:
+        popen_kwargs["shell"] = True
+    try:
+        result = subprocess.run(cmd, timeout=60, **popen_kwargs)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
