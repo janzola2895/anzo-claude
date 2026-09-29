@@ -46,6 +46,22 @@ Palabras clave activas: "Anzo", "Hola Anzo", "Yarvis"/"Jarvis", "Viernes" (refer
 
 El usuario inició sesión con sus credenciales reales de Indra en la ventana de Chrome dedicada, y Anzo pudo navegar por sus apps de Power Apps. Voz "Google" de Chrome confirmada como notablemente más natural que la de Windows. Con esto, todo el flujo (voz → Claude → navegador → sesión real → navegación) queda validado de punta a punta.
 
+## Ampliación: análisis de gráficos de trading (2026-09-28)
+
+Anzo ahora también puede analizar gráficos de trading (XAUUSD y similares) que estén visibles en la ventana de Chrome dedicada — no solo Power Platform. Decisiones del usuario: estilo intradía (M5-M15-H1), y combinar varias estrategias (price action/estructura, medias móviles, momentum RSI/MACD, Fibonacci/SMC-ICT) en vez de depender de un solo indicador, para tener una visión amplia del mercado.
+
+**Implementación:** skill de Claude Code dedicada en `.claude/skills/trading-chart-analysis/SKILL.md` (no una simple ampliación del system prompt) — el usuario prefirió esta opción por ser más estructurada y fácil de ampliar después, aunque implica reabrir un poco el permiso que se había cerrado en el endurecimiento anterior. Cambios en `brain.py`:
+- `--allowedTools` pasó de `"mcp__browser"` a `"mcp__browser,Skill"`. La herramienta `Skill` solo carga instrucciones a el contexto — no tiene acceso a archivos ni shell por su cuenta — así que el blast radius real (qué puede *hacer* Anzo) no cambió, solo qué puede *leer como instrucción*. Nota: `--allowedTools` no tiene una sintaxis confirmada para restringir a una sola skill (tipo `Skill(nombre)`, como sí existe para `Bash(git *)`) — quedó como allowlist del tool completo, que también destraba en teoría las demás skills instaladas a nivel de usuario/plugin (docx, pdf, xlsx, deep-research, etc.), aunque siguen sin poder *ejecutar* nada real sin Bash/Edit/Write.
+- `BROWSER_SYSTEM_PROMPT` amplió su frase de rol (ya no dice solo "Power Platform") y agregó una línea explícita diciendo que use la herramienta Skill para pedidos de análisis de gráficos/trading — igual que con el browser tool, la lección ya aprendida en este proyecto es que sin instrucción explícita Claude no siempre usa lo que tiene disponible.
+
+**Límite de diseño, no negociable:** la skill nunca da un "opera / no operes" como asesoría financiera personalizada — siempre lectura técnica educativa, decisión final del usuario. Igual de importante: instruye a tomar una captura visual real de la pantalla (no el snapshot de accesibilidad/texto de Playwright MCP, que no sirve para leer velas ni indicadores).
+
+## Hito: primera prueba real de análisis de trading (2026-09-28)
+
+Probado en vivo el mismo día: "abre TradingView" → navegó y lo abrió (por defecto mostraba AAPL); pedido de cambiar a XAUUSD por voz (con varias interrupciones en el camino mientras buscaba el símbolo — ver nota de falsos positivos más abajo); "analiza el gráfico, ¿hay oportunidad de operar a la alza o a la baja?" → **la skill se disparó sola, sin nombrarla** (confirma que la descripción del SKILL.md dispara bien). Cambió el gráfico a velas de 15 minutos por su cuenta (intradía, como quedó definido), tomó capturas reales, y dio una lectura combinando las cuatro lentes que pide la skill — dijo explícitamente que no había RSI/MACD/medias agregadas al gráfico en vez de inventar valores, y cerró con el disclaimer obligatorio casi textual al ejemplo del SKILL.md. Validación de punta a punta: exitosa.
+
+Al pedirle "agrega los indicadores que hagan falta", el proceso se cortó a mitad de camino con `You've hit your weekly limit · resets 11pm (America/Bogota)` — el límite semanal del plan de Claude del usuario, no un bug de `server.py`/`brain.py`. Las 2 últimas interacciones se quedaron pensando y terminaron interrumpidas; coincide con el límite cortando la respuesta, posiblemente sumado al falso-positivo de interrupción por voz de fondo (limitación ya conocida, ver "Pendiente" más abajo).
+
 ## Pendiente / mejoras futuras
 
 - Probar tareas reales de **desarrollo/diagnóstico** (editar un campo de una Canvas App, revisar el historial de un flujo de Power Automate, etc.) — la navegación ya funciona, pero esto sigue siendo lo no probado del objetivo original

@@ -62,8 +62,10 @@ MCP_CONFIG_PATH = os.environ.get("ANZO_MCP_CONFIG", "").strip() or (
 # hang waiting for an approval that will never come. This has to be said
 # explicitly; having the tool available isn't enough for Claude to prefer it.
 BROWSER_SYSTEM_PROMPT = (
-    "Eres ANZO, un asistente de voz para desarrollar y diagnosticar Microsoft "
-    "Power Platform (Canvas Apps, Power Automate) controlando un navegador real. "
+    "Eres ANZO, un asistente de voz que ayuda a desarrollar y diagnosticar "
+    "Microsoft Power Platform (Canvas Apps, Power Automate) y a analizar "
+    "graficos de trading (XAUUSD y similares), siempre controlando un "
+    "navegador real. "
     "Para CUALQUIER interaccion con paginas web o el navegador (abrir, navegar, "
     "hacer clic, escribir, leer la pantalla) usa EXCLUSIVAMENTE las herramientas "
     "mcp__browser__*. NUNCA uses Bash, PowerShell, cmd, Start-Process ni ningun "
@@ -73,6 +75,9 @@ BROWSER_SYSTEM_PROMPT = (
     "abierto entre turnos: nunca uses una herramienta para cerrar la "
     "pestana, la ventana ni el navegador, ni siquiera al terminar una "
     "tarea — el usuario sigue la conversacion en esa misma pantalla. "
+    "Si te piden analizar, leer u opinar sobre un grafico, un precio o si "
+    "conviene operar algo, usa la herramienta Skill para cargar la skill "
+    "de analisis de trading antes de responder. "
     "Tus respuestas se leen en voz alta: responde en frases cortas y "
     "naturales, sin markdown ni listas."
 )
@@ -135,8 +140,12 @@ def build_command(message: str, session_id: str | None = None) -> list[str]:
         # auto-approves file edits and a handful of filesystem commands) —
         # without this the browser tools would just be silently denied.
         # Pre-approving the whole "browser" server (not bypassPermissions
-        # for everything) keeps the blast radius to just that tool.
-        cmd += ["--allowedTools", "mcp__browser"]
+        # for everything) keeps the blast radius to just that tool. Skill is
+        # allowlisted too, for the trading-chart-analysis skill under
+        # .claude/skills/ — the Skill tool only loads instructions into
+        # context, it has no filesystem/shell access of its own, so this
+        # doesn't reopen the blast radius the permission tightening closed.
+        cmd += ["--allowedTools", "mcp__browser,Skill"]
         cmd += ["--append-system-prompt", BROWSER_SYSTEM_PROMPT]
     return cmd
 
