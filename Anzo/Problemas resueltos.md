@@ -67,6 +67,34 @@ De paso, esto también explicaba unos `ConnectionAbortedError` sueltos en la con
 
 **Arreglo:** parche local a dos archivos de CCR (ver `Decisiones.md`). Al probar una clave a mano, pegarla cuando `Read-Host` la pida, no dentro del texto del comando.
 
+## El router responde 502 "Core gateway auth token is not initialized" (ANZO abierto sin terminal)
+
+**Síntoma:** ANZO abierto con el acceso directo (sin terminal) se quedaba "pensando". En los logs de CCR cada petición daba 502 en ~10 ms, y la UI de CCR (`127.0.0.1:3458`, Overview) mostraba el banner "Service failed to start: Core gateway exited with 3221225786". Con `python server.py` desde una terminal no pasaba.
+
+**Causa:** 3221225786 = `0xC000013A`, el proceso murió por un evento de control de consola. `ccr start` demoniza: el servicio y su hijo `gateway-bootstrap.js` sobreviven al comando. Sin terminal (`pythonw`, acceso directo) la consola en la que corrió `ccr start` desaparece al terminar el comando y se lleva al gateway. El servicio queda arriba (puertos 3456/3458 escuchando) pero sin gateway, así que acepta peticiones y falla al reenviarlas. Un `ccr stop`/`ccr start` desde una terminal real lo arreglaba, por eso "antes me funcionó con el stop y start".
+
+**Arreglo (`server.py`):** `ccr start` se lanza con `CREATE_NO_WINDOW` (consola oculta que dura lo que dure el demonio). Al abrir ANZO se hace `ccr stop` + `ccr start` (nunca adoptar un demonio viejo), y al cerrar la ventana `ccr stop`. Comprobado: el gateway sigue vivo pasados 25 s y el banner desaparece.
+
+**Cómo diagnosticarlo:** proceso `gateway-bootstrap.js` hijo del `serve --daemon-child` (si falta, el gateway está muerto) y el banner de Overview en la UI de CCR.
+
+## Gemini gratis: 429 "generate_content_free_tier_requests, limit: 20" (2026-09-29)
+
+**Síntoma:** con el router ya sano, Google respondía 429 a todo (log de CCR, `response_body_text`).
+
+**Causa:** el plan gratis de Google AI Studio da **20 peticiones al día por proyecto y modelo** (`gemini-3.8-flash`; se reinicia a medianoche hora del Pacífico). Un turno de ANZO hace varias peticiones (una por cada paso con herramientas, más una llamada chica de fondo), y la CLI reintenta los 429, así que el cupo diario se gasta en pocos turnos. Con la clave nueva ya se había gastado.
+
+**Estado:** sin resolver al cierre de la sesión; ver "Pendiente" en `Decisiones.md`.
+
+## OVH anónimo como último respaldo: no viable por ahora (2026-09-29)
+
+Se agregó a CCR el proveedor `OVH sin registro` (`https://oai.endpoints.kepler.ai.cloud.ovh.net/v1`, sin clave, modelo `Qwen3-Coder-30B-A3B-Instruct`) y a la regla "Todo a Gemini" como respaldo. Con las herramientas del navegador el modelo respondía bien en pruebas directas (~2 s, prompts de ~105 KB aceptados), pero en la prueba real de punta a punta **el respaldo no rindió**:
+
+- **Protocolo equivocado:** CCR registró el proveedor como `anthropic_messages`. OVH responde `404 Unknown request URL: POST /v1/messages`; solo habla `/v1/chat/completions` (OpenAI). Habría que forzar el protocolo OpenAI Chat en el proveedor (Advanced settings, apagar "Auto detect protocols").
+- **Límite del acceso anónimo: 2 peticiones por minuto** (`x-ratelimit-limit-minute: 2`), y aun esperando más de un minuto seguía respondiendo 429 con `remaining: 0`. Probablemente el límite es por IP y esta red lo agota (o lo agotamos con reintentos). Un turno de ANZO hace varias peticiones, y la CLI reintenta rápido los 429, así que se quema solo.
+- Mecánica confirmada en el trace de CCR (UI → Logs, `request_route_traces`): Gemini 429 → CCR salta a OVH → OVH 429. El respaldo por reglas de CCR sí funciona; lo que falla es el destino.
+
+**Estado:** el proveedor queda configurado pero no aporta nada hasta corregir el protocolo y solo si el límite por IP se libera. Sin suscripción ni cupo de Gemini, ANZO no tiene backend hasta que se reinicien (Gemini: medianoche hora del Pacífico, ~2 a.m. Colombia).
+
 ## Otras notas sueltas
 
 - La CLI de `claude` no viene con la app de escritorio — hay que instalarla aparte (`npm install -g @anthropic-ai/claude-code`) y loguearla una vez.

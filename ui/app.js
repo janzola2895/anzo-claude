@@ -9,8 +9,15 @@ const TOKEN = window.ANZO_TOKEN;
 const statusEl = document.getElementById("status");
 const logEl = document.getElementById("log");
 const convButton = document.getElementById("conv-toggle");
+const modelEl = document.getElementById("model");
+let cliModel = "";       // model name the claude CLI reported in its init event
+let shownModel = null;   // what modelEl currently says, to detect a change
 
 const State = { IDLE: "idle", LISTENING: "listening", WORKING: "working" };
+// False while server.py is still starting Chrome/Playwright/router in the
+// background (the window opens first, see /api/ready). Speech is ignored until
+// then: a turn sent before the browser tools are up would just fail.
+let backendReady = false;
 let state = State.IDLE;
 let sessionId = null;
 let eventSource = null;
@@ -25,7 +32,10 @@ let convPaused = false;
 // window so this plain script doesn't need to become a module. Guarded in
 // case the CDN fails to load: the voice/browser pipeline must keep working
 // even if the decorative orb doesn't.
-function setOrb(cls) { if (window.setOrbState) window.setOrbState(cls); }
+function setOrb(cls) {
+  document.body.dataset.state = cls; // drives the CSS aura colour (style.css)
+  if (window.setOrbState) window.setOrbState(cls);
+}
 function setStatus(text) { statusEl.textContent = text; }
 function logLine(cls, text) {
   const div = document.createElement("div");
@@ -202,6 +212,7 @@ function startTurn(message) {
     switch (ev.t) {
       case "status":
         sessionId = ev.session_id || sessionId;
+        if (ev.model) { cliModel = ev.model; refreshModel(); }
         logLine("sys", `(modelo: ${ev.model}, herramientas: ${ev.tools}, mcp: [${(ev.mcp || []).join(", ")}])`);
         break;
       case "delta":
@@ -248,6 +259,7 @@ function startTurn(message) {
 // not every turn's default.
 function finishTurn(statusText) {
   eventSource = null;
+  refreshModel();
   if (conversationMode) {
     state = State.LISTENING; // stays LISTENING indefinitely -- see setConversationMode()
     setOrb("listening");
@@ -299,12 +311,12 @@ function setConvPaused(on) {
 }
 
 function toggleConversationModeFromUI() {
-  if (state === State.WORKING) return;
+  if (!backendReady || state === State.WORKING) return;
   setConversationMode(!conversationMode);
 }
 
 function onFinalUtterance(text) {
-  if (!text.trim()) return;
+  if (!backendReady || !text.trim()) return;
   // Checked first, regardless of state: a turn's "complete" event (and the
   // state change that comes with it) fires as soon as the text is done, but
   // speechSynthesis keeps reading it aloud for several seconds afterward --
@@ -396,6 +408,14 @@ function setupRecognition() {
   };
 
   recognition.onerror = (e) => {
+    // A denied microphone can't fix itself: retrying in onend would loop
+    // forever, flooding the log. Stop and say what to do instead.
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      wantRecognition = false;
+      logLine("sys", "Micrófono bloqueado.");
+      setStatus("Permite el micrófono para esta ventana y reinicia ANZO");
+      return;
+    }
     // "no-speech" and "aborted" are routine; anything else is worth a log line.
     if (e.error !== "no-speech" && e.error !== "aborted") {
       logLine("sys", "Reconocimiento: " + e.error);
@@ -405,8 +425,64 @@ function setupRecognition() {
   recognition.start();
 }
 
+// The CLI only reports the alias it asked for; the router picks the real model
+// (and may switch provider when one runs out), so ask the server, which reads
+// that from the router's own log. Falls back to the CLI-reported name.
+function describeError(status) {
+  if (status === 429) return "sin cupo";
+  return status ? "error " + status : "error";
+}
+
+async function refreshModel() {
+  let text = cliModel ? "Modelo: " + cliModel : "Modelo: —";
+  let ok = null;
+  try {
+    const r = await fetch("/api/model?token=" + encodeURIComponent(TOKEN));
+    const b = (await r.json()).backend;
+    if (b && b.model) {
+      text = "Modelo: " + b.model + (b.provider ? " · " + b.provider : "");
+      ok = b.ok;
+      if (!b.ok) text += " · " + describeError(b.status);
+    }
+  } catch (_) { /* server busy: keep what we show */ }
+  modelEl.dataset.ok = ok === null ? "" : String(ok);
+  if (text !== shownModel) {
+    const first = shownModel === null;
+    shownModel = text;
+    modelEl.textContent = text;
+    if (!first) {
+      modelEl.classList.remove("changed");
+      void modelEl.offsetWidth; // restart the animation
+      modelEl.classList.add("changed");
+    }
+  }
+}
+
+async function waitForBackend() {
+  setOrb("working");
+  setStatus("Iniciando…");
+  for (;;) {
+    try {
+      const r = await fetch("/api/ready?token=" + encodeURIComponent(TOKEN));
+      const j = await r.json();
+      if (j.ready) break;
+      setStatus(j.step || "Iniciando…");
+    } catch (_) {
+      setStatus("Esperando al servidor…");
+    }
+    await new Promise((res) => setTimeout(res, 700));
+  }
+  backendReady = true;
+  refreshModel();
+  setInterval(refreshModel, 4000);
+  state = State.IDLE;
+  setOrb("idle");
+  if (wantRecognition) setStatus("Di \"Anzo\" para empezar");
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   if (!TOKEN) { setStatus("Falta el token — recarga la página."); return; }
   if (convButton) convButton.addEventListener("click", toggleConversationModeFromUI);
   setupRecognition();
+  waitForBackend();
 });

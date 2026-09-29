@@ -58,8 +58,11 @@ MODEL = os.environ.get("ANZO_MODEL", "").strip()
 #   fallback use the subscription first; when it reports a usage/rate limit,
 #            transparently retry the same turn through the router.
 #   always   send every turn through the router (subscription untouched).
+#   router_first  the router (its own provider chain) first; the Claude
+#            subscription only as the last resort, when the router is down or
+#            every provider behind it is out of quota.
 ROUTER_MODE = os.environ.get("ANZO_ROUTER", "off").strip().lower()
-if ROUTER_MODE not in ("off", "fallback", "always"):
+if ROUTER_MODE not in ("off", "fallback", "always", "router_first"):
     ROUTER_MODE = "off"
 ROUTER_HOST = os.environ.get("ANZO_ROUTER_HOST", "127.0.0.1").strip()
 ROUTER_PORT = int(os.environ.get("ANZO_ROUTER_PORT", "3456"))
@@ -69,6 +72,35 @@ ROUTER_KEY = os.environ.get("ANZO_ROUTER_KEY", "").strip()
 # Model as the router names it (e.g. "openrouter,deepseek/deepseek-chat" or a
 # tier alias). Empty = let the router's default/routing rules decide.
 ROUTER_MODEL = os.environ.get("ANZO_ROUTER_MODEL", "").strip()
+# How many times the CLI retries a failed API call when routed (its own default
+# is 10). Free provider tiers count every attempt, and a 429 is retried within
+# seconds, so the default burns a whole day's quota on one stuck turn; 2 makes a
+# real limit surface as a quick "el router devolvio un limite" instead.
+try:
+    ROUTER_MAX_RETRIES = max(0, int(os.environ.get("ANZO_ROUTER_MAX_RETRIES", "2")))
+except ValueError:
+    ROUTER_MAX_RETRIES = 2
+# Bitacora summaries are optional housekeeping. Sending them through the router
+# spends the same small free quota the live turns need, so by default they use
+# the subscription instead; set to 1 to spend router tokens on them.
+SUMMARY_VIA_ROUTER = os.environ.get("ANZO_SUMMARY_VIA_ROUTER", "").strip() == "1"
+
+# CCR, once installed, rewrites the user's GLOBAL ~/.claude/settings.json
+# (env ANTHROPIC_BASE_URL/ANTHROPIC_MODEL pointing at the gateway, plus an
+# apiKeyHelper that hands the CLI the router's key). The CLI reads that file on
+# every start, so scrubbing the child's environment isn't enough: a
+# "subscription" turn silently went through CCR too. This file is passed with
+# --settings (higher precedence than the user's settings) on non-routed runs
+# only, putting the official endpoint back and disabling the apiKeyHelper so
+# the CLI falls back to the claude.ai login.
+SUBSCRIPTION_SETTINGS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                     "anzo-claude-settings.json")
+CCR_LOG_DB = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")),
+                          "claude-code-router", "request-logs.sqlite")
+# In router_first mode: if the router's last request failed on quota this
+# recently, skip it and go straight to the subscription instead of waiting for
+# the router to time out again (each attempt burns quota and ~40s).
+ROUTER_COOLDOWN_S = int(os.environ.get("ANZO_ROUTER_COOLDOWN", "300"))
 
 # Phrases the CLI prints when the plan/API runs out ("You've hit your weekly
 # limit · resets 11pm", "Claude usage limit reached", 429s...). Only applied to
@@ -143,7 +175,14 @@ def child_env(routed: bool = False) -> dict:
         for k, v in os.environ.items()
         if not k.startswith(SCRUBBED_ENV_PREFIXES) and k not in SCRUBBED_ENV_KEYS
     }
+    # The CLI makes a separate small-model request per session just to write a
+    # title -- pure waste here (nobody sees it) and one more call against any
+    # quota, subscription or router.
+    env["CLAUDE_CODE_DISABLE_TERMINAL_TITLE"] = "1"
     if routed:
+        env["CLAUDE_CODE_MAX_RETRIES"] = str(ROUTER_MAX_RETRIES)
+        # No telemetry / feature-flag / availability calls through the router.
+        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
         env["ANTHROPIC_BASE_URL"] = ROUTER_URL
         # The CLI refuses to run without *some* credential once a base URL is
         # set; if the router has no client-key enforcement any placeholder works.
@@ -161,6 +200,31 @@ def router_reachable() -> bool:
         with socket.create_connection((host, port), timeout=1.5):
             return True
     except OSError:
+        return False
+
+
+def router_recently_exhausted() -> bool:
+    """True if claude-code-router's own log says its last request, within
+    ROUTER_COOLDOWN_S, ended in a quota/rate-limit error (after its internal
+    fallback chain). Read-only; any problem reading it -> False."""
+    try:
+        import sqlite3
+        from datetime import datetime, timezone
+        if not os.path.isfile(CCR_LOG_DB):
+            return False
+        uri = "file:" + CCR_LOG_DB.replace("\\", "/") + "?mode=ro"
+        c = sqlite3.connect(uri, uri=True, timeout=1)
+        try:
+            row = c.execute("select status_code, created_at from request_logs "
+                            "order by id desc limit 1").fetchone()
+        finally:
+            c.close()
+        if not row or row[0] != 429:
+            return False
+        age = (datetime.now(timezone.utc)
+               - datetime.fromisoformat(row[1].replace("Z", "+00:00"))).total_seconds()
+        return age < ROUTER_COOLDOWN_S
+    except Exception:  # noqa: BLE001 - best effort, never block a turn on this
         return False
 
 
@@ -204,6 +268,8 @@ def build_command(message: str, session_id: str | None = None, routed: bool = Fa
     model = (ROUTER_MODEL if routed else "") or MODEL
     if model:
         cmd += ["--model", model]
+    if not routed and os.path.isfile(SUBSCRIPTION_SETTINGS):
+        cmd += ["--settings", SUBSCRIPTION_SETTINGS]
     if PERMISSION_MODE:
         cmd += ["--permission-mode", PERMISSION_MODE]
     if MCP_CONFIG_PATH:
@@ -359,6 +425,16 @@ def _run_once(message: str, session_id: str | None = None, routed: bool = False)
             if _valid_session(sid):
                 emitted_session = sid
 
+            if (kind == "system" and ev.get("subtype") == "api_retry"
+                    and routed and not text_seen):
+                # CCR already walked its whole provider chain before answering
+                # with an error, so a retry from the CLI can only hit the same
+                # wall (and burn more free quota). Hand it back to run() now.
+                proc.terminate()
+                yield dict(t="limit", message=("El router no tiene cupo ahora "
+                                               f"({ev.get('error') or 'error'})."))
+                return
+
             if kind == "system" and ev.get("subtype") == "init":
                 # mcp_server_errors: config entries Claude Code rejected at
                 # startup (e.g. a "url" server missing "type") -- it skips
@@ -475,16 +551,24 @@ def run(message: str, session_id: str | None = None):
     off      -> subscription only (a limit surfaces as a normal error).
     always   -> router only.
     fallback -> subscription first; on a quota limit, retry once via router.
+    router_first -> router first; the subscription only as the last resort.
+    Also yields {t: "backend", kind: "router"|"subscription"} before each attempt.
     """
+    if ROUTER_MODE == "router_first":
+        yield from _run_router_first(message, session_id)
+        return
+
     if ROUTER_MODE == "always":
         if not router_reachable():
             yield dict(t="error", message=(
                 f"claude-code-router no responde en {ROUTER_URL}. "
                 "Arrancalo (ccr start) o pon ANZO_ROUTER=off."))
             return
+        yield dict(t="backend", kind="router")
         yield from _finish(_run_once(message, session_id, routed=True), routed=True)
         return
 
+    yield dict(t="backend", kind="subscription")
     first = _run_once(message, session_id, routed=False)
     for ev in first:
         if ev.get("t") != "limit":
@@ -501,8 +585,45 @@ def run(message: str, session_id: str | None = None):
         yield dict(t="warning", message=(
             "Se acabo el limite de la suscripcion; continuo con el router "
             "(otro proveedor)."))
+        yield dict(t="backend", kind="router")
         yield from _finish(_run_once(message, session_id, routed=True), routed=True)
         return
+
+
+def _run_router_first(message: str, session_id: str | None):
+    """Router first (CCR walks its own provider chain: Gemini -> OVH ...), the
+    Claude subscription only as the last resort. Falls to the subscription
+    when the router is down, recently exhausted, or fails before saying
+    anything; once the router has produced text, its errors stay errors (the
+    user already heard part of an answer)."""
+    reason = None
+    if not router_reachable():
+        reason = "el router no responde"
+    elif router_recently_exhausted():
+        reason = "los proveedores del router siguen sin cupo"
+    else:
+        yield dict(t="backend", kind="router")
+        spoke = False
+        for ev in _run_once(message, session_id, routed=True):
+            t = ev.get("t")
+            if t == "delta":
+                spoke = True
+            if t == "limit" or (t == "error" and not spoke):
+                reason = ev.get("message") or "el router fallo"
+                break
+            yield ev
+            if t in ("complete", "interrupted", "error"):
+                return
+        else:
+            return
+    yield dict(t="warning", message=(f"Uso la membresia de Claude: {reason}")[:400])
+    yield dict(t="backend", kind="subscription")
+    for ev in _run_once(message, session_id, routed=False):
+        if ev.get("t") == "limit":
+            yield dict(t="error", message=("La membresia de Claude tambien esta en su "
+                                           "limite: " + ev["message"])[:400])
+            return
+        yield ev
 
 
 def _finish(events, routed: bool):
@@ -552,6 +673,8 @@ def summarize(exchanges: list[tuple[str, str]]) -> str:
         model = (ROUTER_MODEL if routed else "") or MODEL
         if model:
             cmd += ["--model", model]
+        if not routed and os.path.isfile(SUBSCRIPTION_SETTINGS):
+            cmd += ["--settings", SUBSCRIPTION_SETTINGS]
         popen_kwargs = dict(
             cwd=tempfile.gettempdir(), text=True, encoding="utf-8", errors="replace",
             capture_output=True, env=child_env(routed), input=prompt,
@@ -567,12 +690,14 @@ def summarize(exchanges: list[tuple[str, str]]) -> str:
             return None
         return out
 
-    # Summaries are background housekeeping: when a router is configured,
-    # spend the router's tokens on them rather than the subscription's.
-    if ROUTER_MODE == "always" or (ROUTER_MODE == "fallback" and router_reachable()):
-        routed_out = attempt(True) if router_reachable() else None
+    # Summaries are background housekeeping. In "always" mode the subscription
+    # isn't used at all, so they go through the router. Otherwise they stay on
+    # the subscription unless ANZO_SUMMARY_VIA_ROUTER=1 -- the router's free
+    # quota is small and the live turns need it more.
+    if ROUTER_MODE == "always":
+        return (attempt(True) if router_reachable() else None) or ""
+    if ROUTER_MODE in ("fallback", "router_first") and SUMMARY_VIA_ROUTER and router_reachable():
+        routed_out = attempt(True)
         if routed_out:
             return routed_out
-        if ROUTER_MODE == "always":
-            return ""
     return attempt(False) or ""

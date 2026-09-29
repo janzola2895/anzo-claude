@@ -88,9 +88,61 @@ Implementados los 4 pedidos priorizados de la lista de pendientes anterior. El p
 - Probar en vivo que la tarea programada arranca sola en el próximo inicio de sesión de Windows (quedó verificada como registrada y `Ready`, pero no probada con un logon real todavía)
 - Si la pestaña de la interfaz de voz queda minimizada/en segundo plano por un rato largo, Chrome puede retrasar temporizadores (`setTimeout`) del propio `app.js` — confirmado en pruebas que esto puede demorar mucho la recuperación de `inEchoWindow` (ver bug de abajo). En uso normal la pestaña suele quedar visible, pero si Anzo deja de reaccionar después de estar mucho tiempo sin usarse, esta es la primera sospechosa
 
+- **Cupo de Gemini gratis (20 peticiones/día por modelo)** es muy poco para ANZO: decidir entre varios modelos Gemini como respaldo en cadena (cada uno con su propio cupo), activar facturación de pago por uso en el proyecto de Google (Flash cuesta centavos por día) u otro proveedor. Es el bloqueo actual del respaldo por CCR
 - **Fallo rápido con el router:** hacer que Anzo avise de inmediato cuando un proveedor del router devuelve un límite (429), en vez de esperar el timeout de 180s. Pendiente de implementar en `brain.py`; solo hace falta si vuelve a pasar
 - **Reaplicar el parche de CCR** para claves `AQ.` si se actualiza CCR con npm (ver "CCR probado en vivo") y Gemini vuelve a dar 401; o revisar si una versión nueva de CCR ya lo trae corregido
+- Confirmar en uso real la ventana de app: permiso de micrófono la primera vez, voz de ida y vuelta, y que el acceso directo del Escritorio arranque todo. Decidir si la tarea de autoarranque `ANZO` se mantiene (abriría la ventana en cada inicio de sesión) o se desinstala con `scripts/uninstall-autostart.ps1`
 - Cuando se reinicie el cupo de Codex (~2026-10-13) revisar si conviene dejarlo como respaldo o quitarlo de la regla
+
+## ANZO como aplicación de escritorio (2026-09-29)
+
+**Pedido:** abrir ANZO era tedioso (terminal, variables, `python server.py`); el usuario quería doble clic y una animación más elegante, sin bordes visibles.
+
+**Decisión:** mantener la interfaz web y no pasarla a Tkinter. El reconocimiento de voz depende de la Web Speech API de Chrome (Tkinter no la tiene; WebView2 tampoco la garantiza). En su lugar `server.py` abre una ventana de aplicación de Chrome (`--app`, sin pestañas ni barra de direcciones) con su propio perfil (`.ui-profile/`), separado del Chrome de automatización (`.browser-profile/`) y del navegador diario del usuario, por el mismo motivo de siempre: si Claude navega la pestaña de la UI, ANZO se queda sordo.
+
+**Cómo funciona:**
+- `Anzo.pyw` (con `pythonw`, sin consola) redirige stdout/stderr a `logs/anzo.log` **a nivel del sistema operativo** (`SetStdHandle`), para que los procesos hijos (Chrome, Playwright MCP, `ccr`) hereden el archivo y no un handle muerto que los bloquearía al llenarse el pipe. Acceso directo con ícono en el Escritorio: `scripts/install-shortcut.ps1` (ícono generado con `scripts/make_icon.py`, solo librería estándar).
+- La ventana abre **de inmediato**; el arranque lento (Chrome de trabajo, Playwright MCP, router) corre en un hilo aparte y la UI consulta `/api/ready` y muestra el paso actual ("Conectando las herramientas del navegador…"). Mientras no esté listo se ignora la voz.
+- **Cerrar la ventana cierra ANZO** y lo que inició. Si ya hay una instancia corriendo (puerto ocupado, p. ej. la tarea de autoarranque), solo abre otra ventana sobre ella.
+- `.env` (ignorado por git; plantilla `.env.example`) se lee al arrancar. Motivo: `ANZO_ROUTER`, `ANZO_ROUTER_KEY`, etc. solo existían `set` en la terminal del usuario, y un doble clic no los hereda: ANZO habría vuelto a usar solo la suscripción. Las variables reales del entorno siguen ganando sobre el archivo.
+- Modos de UI con `ANZO_UI`: `app` (defecto), `browser` (pestaña del navegador por defecto, comportamiento anterior), `none`. `ANZO_NO_AUTOMATION=1` salta Chrome/MCP/router para probar solo la interfaz.
+
+**Animación:** el "borde" era real. El lienzo era un cuadrado de 220 px y la esfera, al pulsar, se salía del cuadro y quedaba recortada. Ahora el lienzo cubre toda la ventana, las partículas son sprites redondos suaves con mezcla aditiva, hay un núcleo y un halo que llegan a transparente antes del borde, y un resplandor CSS (`#aura`) que cambia de color con el estado y se desvanece igual. El tamaño se recalcula con la ventana. El registro de la conversación se desvanece arriba en vez de cortarse.
+
+**Arreglos de paso:**
+- Micrófono denegado: `onend` reintentaba sin parar y llenaba el registro; ahora se detiene y pide dar permiso.
+- `_stop()` solo terminaba el `cmd.exe` de `npx` y dejaba el `node.exe` de Playwright MCP vivo en el 8931 tras cerrar; ahora usa `taskkill /T`.
+
+**Probado:** interfaz en el navegador aislado (estados y colores) y el ciclo completo con `pythonw` (abrir → `/api/ready` en ~4 s → cerrar ventana → sin procesos en 8731/8931). **No probado por mí:** voz real dentro de la ventana de la app; el permiso de micrófono se pide una vez en la ventana (perfil nuevo) y se recuerda. Three.js sigue viniendo de un CDN (jsdelivr); sin internet el orbe no se dibuja pero el resplandor CSS y todo lo demás funcionan.
+
+## Menos peticiones por turno y modelo visible en pantalla (2026-09-29)
+
+**Contexto:** con cupos gratis muy chicos (Gemini: 20 peticiones/día por modelo), cada petición cuenta. Medido en el log de CCR, cada llamada de la CLI iba acompañada de otra pequeña que solo pedía **el título de la sesión** ("Write the title in the predominant language…"), y la CLI reintenta los 429 hasta 10 veces.
+
+**Cambios en `brain.py`:**
+- `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` en todos los hijos: se acaba la petición del título (una menos por turno).
+- Solo por el router: `CLAUDE_CODE_MAX_RETRIES` = `ANZO_ROUTER_MAX_RETRIES` (defecto 2, antes 10) y `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`.
+- Los resúmenes de la bitácora ya no pasan por el router (gastaban el mismo cupo chico que los turnos en vivo): usan la suscripción, salvo `ANZO_ROUTER=always` o `ANZO_SUMMARY_VIA_ROUTER=1`.
+
+**No resuelto:** con Gemini agotado el turno sigue sin fallar rápido. CCR respeta el `Retry-After` de Google (~41 s) y hace su propio respaldo antes de contestarle a la CLI, así que limitar los reintentos de la CLI solo no basta.
+
+**Hallazgo importante:** el `~/.claude/settings.json` del usuario tiene `ANTHROPIC_BASE_URL` y `ANTHROPIC_MODEL` apuntando a CCR (CCR "tomó" el perfil global de Claude Code). Por eso **toda** llamada de la CLI en esta máquina, también el intento que ANZO cree "de suscripción", pasa por CCR: `brain.child_env()` limpia el entorno del proceso pero la CLI vuelve a leer esos valores del archivo de settings. Consecuencias: la suscripción de Claude hoy no se usa en ANZO, el mensaje "se acabó el límite de la suscripción" en realidad era el límite del proveedor del router, y el modelo que reporta la CLI es solo el alias. No se tocó ese archivo (es del usuario); se resolvió con un `--settings` propio, ver la sección siguiente.
+
+**Modelo visible:** debajo del estado, una línea "● Modelo: gemini-3.8-flash · Google Gemini" (verde si respondió bien, rojo con "sin cupo"/"error N" si falló). Se actualiza cada 4 s y al terminar cada turno, y destella al cambiar (p. ej. cuando el router salta a otro proveedor). El servidor la saca de `/api/model`, que lee **solo lectura** el `request-logs.sqlite` de CCR (`response_model`/`resolved_model` de la última petición, si es de los últimos 30 min), porque la CLI solo conoce el alias que pidió. Sin tráfico reciente cae al modelo que reporta la CLI. Probado con el log real y simulando cambios de modelo en la UI; no con un turno exitoso (no hay cupo hoy).
+
+## Router primero, membresía de Claude como último recurso (2026-09-29)
+
+**Pedido:** usar primero los proveedores del router (Gemini → OVH) y la membresía de Claude solo cuando ninguno tenga cupo.
+
+**`--settings` propio (`anzo-claude-settings.json`, en el repo, sin secretos):** CCR reescribió el `~/.claude/settings.json` global con `ANTHROPIC_BASE_URL`/`ANTHROPIC_MODEL` hacia el gateway **y un `apiKeyHelper`** que le entrega a la CLI la clave del router. Limpiar el entorno del hijo no basta, porque la CLI lee ese archivo al arrancar. Los intentos de membresía pasan `--settings` con el endpoint oficial (`https://api.anthropic.com`), modelo `sonnet` y `"apiKeyHelper": ""`. Sin anular el `apiKeyHelper` la CLI mandaba la clave del router a Anthropic y fallaba con `authentication_failed` en bucle (se veía como "se queda pensando"). Verificado: `apiKeySource=none` (login de claude.ai), modelo `claude-sonnet-5`, y cero peticiones nuevas en el log de CCR. Los intentos ruteados no llevan el archivo y siguen usando la config global de CCR.
+
+**Modo `ANZO_ROUTER=router_first`** (ahora el de `.env`): `brain._run_router_first()`.
+- Si el router no responde, o su última petición (según su propio log, solo lectura) fue un 429 hace menos de `ANZO_ROUTER_COOLDOWN` segundos (300), va directo a la membresía.
+- Si no, intenta por el router. Un `system/api_retry` de la CLI en un turno ruteado significa que CCR ya recorrió toda su cadena y falló: se corta en ese momento y pasa a la membresía (antes la CLI reintentaba 10 veces y ANZO se quedaba pensando hasta el timeout de 180 s).
+- Si el router ya empezó a hablar, un error posterior se queda como error (no se repite la respuesta con otro modelo).
+- Cada intento emite `{t: "backend", kind}`; el servidor lo usa para que la etiqueta de modelo diga "claude-sonnet-5 · Claude (membresía)" cuando responde la membresía (el log de CCR no la ve).
+
+**Probado de punta a punta** (instancia de prueba, Gemini y OVH sin cupo): primer turno → router → `api_retry rate_limit` → membresía respondió; segundo turno → se saltó el router por el enfriamiento y respondió la membresía en ~3 s. No medido: cuánto tarda exactamente el primer intento por el router antes del `api_retry` (CCR respeta el `Retry-After` de Google, del orden de 40 s).
 
 ## Cambio de diseño: modo normal ya no tiene ventana de gracia (2026-09-29)
 

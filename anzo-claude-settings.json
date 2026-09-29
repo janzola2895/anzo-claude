@@ -1,0 +1,11 @@
+{
+  "apiKeyHelper": "",
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+    "ANTHROPIC_API_BASE_URL": "https://api.anthropic.com",
+    "CLAUDE_AGENT_API_BASE_URL": "https://api.anthropic.com",
+    "ANTHROPIC_MODEL": "sonnet",
+    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "0",
+    "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT": "0"
+  }
+}

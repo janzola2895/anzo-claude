@@ -1,49 +1,137 @@
+/* --accent follows the voice state (set via body[data-state] in app.js) and is
+   registered as a <color> so it cross-fades instead of snapping. The aura and
+   the WebGL orb share it, so nothing on screen has a hard edge. */
+@property --accent {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #5b7cff;
+}
+
+:root { --bg: #07090f; }
+
 html, body {
   height: 100%;
   margin: 0;
-  background: #0b0d12;
+  overflow: hidden;
+  background: var(--bg);
   color: #e8eaf0;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  --accent: #5b7cff;
+  transition: --accent 0.9s ease;
+}
+body[data-state="listening"] { --accent: #66a3ff; }
+body[data-state="working"]   { --accent: #ffb03b; }
+body[data-state="speaking"]  { --accent: #3bffaa; }
+
+/* Ambient light behind the orb: a radial falloff to fully transparent, so
+   there is no visible box/edge anywhere. */
+#aura {
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 38%,
+      color-mix(in srgb, var(--accent) 16%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 6%, transparent) 32%,
+      transparent 62%);
+  pointer-events: none;
+}
+
+/* Full-window canvas (not a small square): the sphere and its halo can never
+   be clipped by the canvas boundary. */
+#orb-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#hud {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0 24px 26px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 24px;
-}
-
-#orb-canvas {
-  width: 220px;
-  height: 220px;
+  gap: 14px;
 }
 
 #status {
   font-size: 15px;
-  color: #9aa3b8;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--accent) 45%, #9aa3b8);
   min-height: 20px;
+  text-align: center;
+  transition: color 0.9s ease;
+}
+
+/* Which model is answering right now (see refreshModel in app.js). Flashes
+   briefly when it changes, e.g. when the router falls back to another one. */
+#model {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  color: #7c869c;
+  min-height: 16px;
+  text-align: center;
+  transition: color 0.4s ease;
+}
+#model::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 8px;
+  background: #4a5266;
+  vertical-align: 1px;
+}
+#model[data-ok="true"]::before  { background: #3bffaa; box-shadow: 0 0 8px #3bffaa88; }
+#model[data-ok="false"]::before { background: #ff6b6b; box-shadow: 0 0 8px #ff6b6b88; }
+#model.changed { animation: model-flash 1.4s ease; }
+@keyframes model-flash {
+  0%   { color: #ffffff; text-shadow: 0 0 12px var(--accent); }
+  100% { color: #7c869c; text-shadow: none; }
 }
 
 #conv-toggle {
   font: inherit;
-  font-size: 13px;
-  color: #c6cbdb;
-  background: #1a1d27;
-  border: 1px solid #2c3040;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  color: #9aa3b8;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 999px;
   padding: 6px 16px;
   cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
 }
-#conv-toggle:hover { border-color: #5b7cff; }
-#conv-toggle[aria-pressed="true"] { color: #b7c3ff; border-color: #5b7cff; background: #1c2340; }
+#conv-toggle:hover { border-color: rgba(91, 124, 255, 0.7); color: #c6cbdb; }
+#conv-toggle[aria-pressed="true"] {
+  color: #b7c3ff;
+  border-color: rgba(91, 124, 255, 0.7);
+  background: rgba(91, 124, 255, 0.14);
+}
 
+/* Conversation log: soft fade at the top instead of a hard clipped edge. */
 #log {
-  width: min(680px, 90vw);
-  max-height: 40vh;
+  width: min(420px, 100%);
+  max-height: 22vh;
   overflow-y: auto;
+  scrollbar-width: none;
   font-size: 13px;
   line-height: 1.5;
   color: #c6cbdb;
   white-space: pre-wrap;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 34%);
+  mask-image: linear-gradient(to bottom, transparent, #000 34%);
 }
+#log::-webkit-scrollbar { display: none; }
 
 #log .you { color: #7fb1ff; }
 #log .anzo { color: #b7ffcf; }

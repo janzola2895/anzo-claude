@@ -2,7 +2,10 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#07090f">
 <title>ANZO</title>
+<link rel="icon" href="/anzo.ico">
 <link rel="stylesheet" href="/style.css">
 <script type="importmap">
 {
@@ -12,11 +15,15 @@
 }
 </script>
 </head>
-<body>
+<body data-state="idle">
+  <div id="aura"></div>
   <canvas id="orb-canvas"></canvas>
-  <div id="status">Di "Anzo" para empezar</div>
-  <button id="conv-toggle" type="button">Modo conversación: OFF</button>
-  <div id="log"></div>
+  <main id="hud">
+    <div id="log"></div>
+    <div id="status">Iniciando…</div>
+    <div id="model" title="Modelo que está respondiendo ahora">Modelo: —</div>
+    <button id="conv-toggle" type="button">Modo conversación: OFF</button>
+  </main>
 
   <script>window.ANZO_TOKEN = "__ANZO_TOKEN__";</script>
   <script type="module" src="/orb.js"></script>
