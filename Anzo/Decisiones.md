@@ -130,3 +130,28 @@ Con los cuatro arreglos de esta sección (eco por hueco de estado, eco por puntu
 - La bitácora escribiendo de verdad en `Anzo/Bitacora/` después de una conversación real
 - La tarea programada arrancando sola en un inicio de sesión real de Windows (sigue como pendiente más abajo)
 - Tareas reales de desarrollo/diagnóstico de Power Platform (Canvas Apps / Power Automate) — sigue siendo lo no probado del objetivo original, ver "Pendiente"
+
+## Integración con claude-code-router (2026-09-29)
+
+**Problema:** Anzo dependía solo de la suscripción de Claude del usuario; al llegar el límite semanal (ver 2026-09-28) todo se detenía.
+
+**Solución:** [musistudio/claude-code-router](https://github.com/musistudio/claude-code-router) (CCR) es un gateway local (`127.0.0.1:3456`) que la misma CLI `claude` puede usar vía `ANTHROPIC_BASE_URL`, y desde ahí enruta a otros proveedores/cuentas (OpenRouter, DeepSeek, Gemini, otra key de Anthropic, rotación de credenciales, fallbacks). No se copió su código: Anzo lo usa como servicio externo, igual que Chrome/Playwright MCP.
+
+**Modos (`ANZO_ROUTER`):**
+- `off` (defecto): sin cambios, solo suscripción.
+- `fallback` (recomendado): suscripción primero; si la CLI reporta límite (`hit your weekly limit`, `usage limit`, 429, etc.), `brain.run()` reintenta el mismo turno por el router y avisa con un evento `warning`.
+- `always`: todo por el router.
+
+**Reglas que se mantienen:** el entorno sigue limpiándose de `ANTHROPIC_*`/`CLAUDE_CODE_*`; solo el proceso *ruteado* recibe `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` (la clave de cliente de CCR, `ANZO_ROUTER_KEY`). Las claves de los proveedores viven en la config de CCR (`~/.claude-code-router`), nunca en este repo. La detección de límite solo mira mensajes cortos (<300 caracteres) para no confundir una respuesta que hable de "rate limits". Los resúmenes de la bitácora usan el router primero cuando está disponible, para no gastar suscripción en tareas de fondo.
+
+**Configuración (una vez):**
+```
+npm install -g @musistudio/claude-code-router   # Node 22+
+ccr ui                                           # agregar proveedor + modelo, crear API key de cliente
+set ANZO_ROUTER=fallback
+set ANZO_ROUTER_KEY=<clave de cliente de CCR>
+set ANZO_ROUTER_MODEL=<modelo tal como lo nombra CCR>   # opcional
+```
+`server.py` corre `ccr start --no-open` al arrancar si el modo no es `off`. Otras variables: `ANZO_ROUTER_URL`, `ANZO_ROUTER_HOST`, `ANZO_ROUTER_PORT`.
+
+**Limitaciones conocidas (sin verificar contra un router real todavía):** la lógica se probó con una CLI simulada, no con CCR corriendo. Un turno reintentado por el router hace `--resume` de una sesión creada con Claude; si el modelo del proveedor rechaza ese historial, habrá que reintentar sin `--resume`. Modelos que no son de Anthropic pueden manejar peor las herramientas `mcp__browser`.

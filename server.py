@@ -126,6 +126,31 @@ def start_browser_mcp():
     return proc
 
 
+def start_router():
+    """Start claude-code-router's background service (gateway on :3456) when
+    ANZO_ROUTER is fallback/always. `ccr start` daemonizes and returns, and
+    reuses an already-running service, so there is no process for us to own or
+    stop -- unlike Chrome/Playwright MCP. Providers, keys and routing rules are
+    configured once in CCR's own UI (`ccr ui`), never stored in this repo."""
+    if brain.ROUTER_MODE == "off":
+        return False
+    ccr = shutil.which("ccr")
+    if not ccr:
+        print("WARNING: ANZO_ROUTER esta activo pero no encuentro `ccr` en PATH. "
+              "Instalalo con 'npm install -g @musistudio/claude-code-router' "
+              "(Node 22+). Sin router, Anzo sigue solo con la suscripcion.")
+        return False
+    try:
+        subprocess.run([ccr, "start", "--no-open"], timeout=60,
+                       shell=(sys.platform == "win32"))
+    except (subprocess.TimeoutExpired, OSError) as e:
+        print(f"WARNING: `ccr start` fallo: {e}")
+        return False
+    print(f"claude-code-router iniciado (modo {brain.ROUTER_MODE}), "
+          f"gateway en {brain.ROUTER_URL}")
+    return True
+
+
 _exchange_lock = threading.Lock()
 _pending_exchanges = []  # [(user_text, anzo_text), ...] since the last summary
 _last_activity = time.monotonic()
@@ -349,6 +374,11 @@ def main():
         print("Esperando a que el servidor de Playwright MCP responda "
               "(la primera vez puede tardar mientras npx descarga el paquete)...")
         _wait_for_port(BROWSER_MCP_PORT, 60, "Playwright MCP")
+    if start_router():
+        _wait_for_port(brain.ROUTER_PORT, 30, "claude-code-router gateway")
+        if not brain.ROUTER_KEY:
+            print("AVISO: ANZO_ROUTER_KEY vacio. Si el router exige clave de cliente "
+                  "(pagina API Keys de `ccr ui`), crea una y exportala.")
     threading.Thread(target=_summary_loop, daemon=True).start()
 
     # ThreadingHTTPServer's constructor already binds and listens, so the
