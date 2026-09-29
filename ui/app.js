@@ -186,7 +186,6 @@ function startTurn(message) {
     logLine("sys", "(interrumpido)");
     interruptCurrentTurn();
   }
-  clearTimeout(listeningTimeout);
   recentlySpoken = "";
   state = State.WORKING;
   setOrb("working");
@@ -221,12 +220,12 @@ function startTurn(message) {
         sessionId = ev.session_id || sessionId;
         flushSentence(true);
         if (replyBuffer.trim()) logLine("anzo", "Anzo: " + replyBuffer.trim());
-        finishTurn(conversationMode
-          ? "Te escucho…"
-          : "Puedes responder directamente, o di \"Anzo\" para algo nuevo");
+        // finishTurn only uses this text in conversation mode -- normal
+        // mode always shows "Di 'Anzo' para empezar" instead.
+        finishTurn("Te escucho…");
         break;
       case "interrupted":
-        finishTurn("Interrumpido. Puedes seguir hablando");
+        finishTurn("Interrumpido.");
         break;
       case "error":
         logLine("sys", "Error: " + ev.message);
@@ -241,27 +240,23 @@ function startTurn(message) {
   };
 }
 
-// After a turn ends, keep listening for a follow-up without requiring the
-// wake word again for a short window -- answering a question Anzo just
-// asked, or a quick correction, shouldn't need "Anzo" every single time.
-// Falls back to requiring the wake word again if nothing is said in time.
-let listeningTimeout = null;
-const FOLLOW_UP_WINDOW_MS = 12000;
-
+// Normal mode always requires the wake word again after a turn -- no grace
+// window. There used to be one (skip "Anzo" for ~12s to answer a quick
+// follow-up), but that was also a source of Anzo reacting to stray speech
+// that was never meant for it. "Keep listening without repeating Anzo" is
+// now conversation mode's job specifically (opt-in, clearly signposted),
+// not every turn's default.
 function finishTurn(statusText) {
   eventSource = null;
-  state = State.LISTENING;
-  setOrb("listening");
-  setStatus(statusText);
-  clearTimeout(listeningTimeout);
-  if (conversationMode) return; // stays LISTENING indefinitely -- see setConversationMode()
-  listeningTimeout = setTimeout(() => {
-    if (state === State.LISTENING) {
-      state = State.IDLE;
-      setOrb("idle");
-      setStatus("Di \"Anzo\" para empezar");
-    }
-  }, FOLLOW_UP_WINDOW_MS);
+  if (conversationMode) {
+    state = State.LISTENING; // stays LISTENING indefinitely -- see setConversationMode()
+    setOrb("listening");
+    setStatus(statusText);
+    return;
+  }
+  state = State.IDLE;
+  setOrb("idle");
+  setStatus("Di \"Anzo\" para empezar");
 }
 
 // Matches a whole utterance (ignoring accents/case/trailing punctuation)
@@ -285,7 +280,6 @@ function setConversationMode(on) {
   conversationMode = on;
   convPaused = false;
   updateConvButton();
-  clearTimeout(listeningTimeout);
   if (on) {
     if (state !== State.WORKING) { state = State.LISTENING; setOrb("listening"); }
     setStatus("Modo conversación activo. Di \"pausa\" o \"cambio y fuera\" cuando quieras.");

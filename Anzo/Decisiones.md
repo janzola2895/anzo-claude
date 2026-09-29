@@ -88,6 +88,14 @@ Implementados los 4 pedidos priorizados de la lista de pendientes anterior. El p
 - Probar en vivo que la tarea programada arranca sola en el próximo inicio de sesión de Windows (quedó verificada como registrada y `Ready`, pero no probada con un logon real todavía)
 - Si la pestaña de la interfaz de voz queda minimizada/en segundo plano por un rato largo, Chrome puede retrasar temporizadores (`setTimeout`) del propio `app.js` — confirmado en pruebas que esto puede demorar mucho la recuperación de `inEchoWindow` (ver bug de abajo). En uso normal la pestaña suele quedar visible, pero si Anzo deja de reaccionar después de estar mucho tiempo sin usarse, esta es la primera sospechosa
 
+## Cambio de diseño: modo normal ya no tiene ventana de gracia (2026-09-29)
+
+El usuario reportó que en modo normal (no modo conversación) Anzo a veces seguía reaccionando sin que dijera la palabra clave. Causa: después de cada turno, `finishTurn()` dejaba a Anzo en `LISTENING` (sin pedir "Anzo") durante 12 segundos de gracia (`FOLLOW_UP_WINDOW_MS`) antes de volver a `IDLE` -- pensado originalmente para responder una pregunta rápido, pero era también una ventana donde cualquier habla suelta (o un eco que el filtro no cachara) se tomaba como instrucción nueva sin que el usuario lo pidiera.
+
+**Decisión:** modo normal ahora siempre vuelve directo a `IDLE` al terminar un turno -- pide "Anzo" de nuevo cada vez, sin excepción. "Seguir escuchando sin repetir la palabra clave" queda exclusivamente como el trabajo de modo conversación (que sigue funcionando igual, activado a propósito). Se eliminó `listeningTimeout`/`FOLLOW_UP_WINDOW_MS` de `ui/app.js` -- ya no existía ningún camino que los necesitara. La interrupción en caliente mientras Anzo está `WORKING` (hablar por encima sin decir "Anzo") no se tocó -- eso sigue siendo un requisito original del proyecto, distinto de la ventana de gracia post-turno que sí se quitó.
+
+Probado en el navegador aislado: tras un turno normal, una frase sin "Anzo" se ignora (vuelve a pedir la palabra clave); con "Anzo" sí se acepta; en modo conversación una frase sin "Anzo" se sigue aceptando igual que antes. Nota: esto reduce pero no elimina del todo el riesgo de auto-eco -- el filtro de texto sigue siendo una heurística, no cancelación acústica real (ver limitación ya anotada arriba).
+
 ## Bug real: Anzo se escuchaba a sí mismo y se autorespondía (2026-09-29)
 
 Reportado en vivo: tras una respuesta corta de Anzo, el micrófono recogió la cola de su propia voz saliendo por los parlantes y la tomó como un mensaje nuevo del usuario — Anzo le contestó a su propia frase, esa respuesta se volvió a autoescuchar, y así en cadena. No era eco de la sala (el usuario confirmó que no estaba en un lugar con eco): era la propia voz de Anzo filtrándose del parlante al micrófono, sin auriculares.
