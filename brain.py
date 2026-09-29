@@ -122,6 +122,39 @@ _LIMIT_MAX_LEN = 300
 PERMISSION_MODE = os.environ.get("ANZO_PERMISSION_MODE", "").strip()
 WORKDIR = os.path.expanduser(os.environ.get("ANZO_WORKDIR", os.getcwd()))
 
+def _desktop_dir() -> str:
+    """The real Desktop folder. On this machine it lives under OneDrive
+    ("OneDrive - Indra\\Escritorio"), not ~/Desktop -- ANZO guessed the latter
+    and failed. Read from the shell-folders registry key, like Explorer does."""
+    if IS_WINDOWS:
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows"
+                                r"\CurrentVersion\Explorer\User Shell Folders") as k:
+                return os.path.expandvars(winreg.QueryValueEx(k, "Desktop")[0])
+        except OSError:
+            pass
+    return os.path.join(os.path.expanduser("~"), "Desktop")
+
+
+# The one folder outside the project ANZO may write to: screenshots/images
+# (Playwright MCP gets it as --output-dir, its only extra allowed root) and
+# text files like HTML/notes (a path-scoped Edit rule). Headless claude -p can't
+# show a permission prompt, so anything not pre-approved is silently denied --
+# that's why "save it to my desktop" failed with no dialog. Scoped to this
+# folder on purpose, not the whole Desktop or disk.
+OUTPUT_DIR = os.environ.get("ANZO_OUTPUT_DIR", "").strip() or os.path.join(
+    _desktop_dir(), "ANZO archivos")
+
+
+def _permission_path(path: str) -> str:
+    """C:\\a\\b -> //c/a/b, the absolute-path form Claude Code permission rules use."""
+    p = os.path.abspath(path).replace("\\", "/")
+    if len(p) > 1 and p[1] == ":":
+        p = "/" + p[0].lower() + p[2:]
+    return "/" + p
+
+
 _default_mcp_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp-config.json")
 MCP_CONFIG_PATH = os.environ.get("ANZO_MCP_CONFIG", "").strip() or (
     _default_mcp_config if os.path.isfile(_default_mcp_config) else ""
@@ -150,6 +183,12 @@ BROWSER_SYSTEM_PROMPT = (
     "Si te piden analizar, leer u opinar sobre un grafico, un precio o si "
     "conviene operar algo, usa la herramienta Skill para cargar la skill "
     "de analisis de trading antes de responder. "
+    "Si te piden guardar una imagen, captura o archivo (o dejarlo en el "
+    "escritorio), guardalo en la carpeta " + OUTPUT_DIR + " : las capturas con "
+    "mcp__browser__browser_take_screenshot usando esa ruta completa en filename, "
+    "y los archivos de texto (HTML, notas) con Write en esa misma carpeta. Es la "
+    "unica carpeta donde puedes guardar; no intentes copiar con comandos de "
+    "shell. "
     "Tus respuestas se leen en voz alta: responde en frases cortas y "
     "naturales, sin markdown ni listas."
 )
@@ -284,7 +323,9 @@ def build_command(message: str, session_id: str | None = None, routed: bool = Fa
         # .claude/skills/ — the Skill tool only loads instructions into
         # context, it has no filesystem/shell access of its own, so this
         # doesn't reopen the blast radius the permission tightening closed.
-        cmd += ["--allowedTools", "mcp__browser,Skill"]
+        cmd += ["--allowedTools", "mcp__browser,Skill",
+                f"Edit({_permission_path(OUTPUT_DIR)}/**)"]
+        cmd += ["--add-dir", OUTPUT_DIR]
         cmd += ["--append-system-prompt", BROWSER_SYSTEM_PROMPT]
     return cmd
 

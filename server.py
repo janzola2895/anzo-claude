@@ -137,6 +137,19 @@ def start_chrome():
     return proc
 
 
+def _clean_console_logs():
+    """Playwright MCP also drops a console-<timestamp>.log into its output dir
+    for every client session (one per ANZO turn). Those would pile up in the
+    user's desktop folder, so remove them at startup and shutdown. Only files
+    matching that exact pattern are touched."""
+    import glob
+    for f in glob.glob(os.path.join(brain.OUTPUT_DIR, "console-*.log")):
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+
+
 def start_browser_mcp():
     """Launch the Playwright MCP server as its own long-lived process, attached
     to the Chrome instance from start_chrome() via CDP rather than launching
@@ -146,8 +159,13 @@ def start_browser_mcp():
         print("WARNING: npx not found — browser control will not be available "
               "(install Node.js). Continuing with voice-only.")
         return None
+    os.makedirs(brain.OUTPUT_DIR, exist_ok=True)
+    _clean_console_logs()
     cmd = [npx, "@playwright/mcp@latest",
            "--port", str(BROWSER_MCP_PORT),
+           # Its only extra allowed root, so screenshots can land in the
+           # user's "ANZO archivos" desktop folder (see brain.OUTPUT_DIR).
+           "--output-dir", brain.OUTPUT_DIR,
            "--cdp-endpoint", f"http://localhost:{CHROME_DEBUG_PORT}"]
     # No stdout=PIPE here: nothing was reading that pipe, so its output
     # buffer would eventually fill and silently block the process (and any
@@ -605,6 +623,7 @@ def main():
         server.server_close()
         _stop(procs.get("mcp"), "browser MCP")
         _stop(procs.get("chrome"), "Chrome")
+        _clean_console_logs()
         stop_router()
         _maybe_flush_summary(force=True)
 
