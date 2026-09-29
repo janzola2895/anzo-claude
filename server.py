@@ -71,7 +71,8 @@ ALLOWED_ORIGIN = f"http://{HOST}:{PORT}"
 
 BROWSER_MCP_PORT = int(os.environ.get("ANZO_BROWSER_MCP_PORT", "8931"))
 CHROME_DEBUG_PORT = int(os.environ.get("ANZO_CHROME_DEBUG_PORT", "9223"))
-PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".browser-profile")
+PROFILE_DIR = os.environ.get("ANZO_BROWSER_PROFILE", "").strip() or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), ".browser-profile")
 # Separate Chrome profile for ANZO's own app window (mic permission, etc.), so
 # it never mixes with the automation Chrome above or the user's daily browser.
 UI_PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".ui-profile")
@@ -429,6 +430,10 @@ class Handler(BaseHTTPRequestHandler):
 
         self._send_json(404, {"error": "not found"})
 
+    def _sse(self, ev):
+        self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode("utf-8"))
+        self.wfile.flush()
+
     def _handle_stream(self, parsed):
         qs = parse_qs(parsed.query)
         if not self._origin_ok() or qs.get("token", [""])[0] != TOKEN:
@@ -448,6 +453,11 @@ class Handler(BaseHTTPRequestHandler):
 
         reply_parts = []
         try:
+            if _boot_state.get("ready") and not browser_up():
+                self._sse({"t": "warning", "message": "Reabriendo el navegador de trabajo…"})
+                problem = ensure_browser()
+                if problem:
+                    self._sse({"t": "warning", "message": problem})
             for ev in brain.run(message, session_id):
                 line = f"data: {json.dumps(ev)}\n\n".encode("utf-8")
                 self.wfile.write(line)
@@ -553,6 +563,59 @@ def open_ui():
     return None
 
 
+# Processes this server launched (automation Chrome, Playwright MCP). Global so
+# ensure_browser() can replace them mid-session and shutdown stops the current ones.
+_procs = {}
+_browser_lock = threading.Lock()
+
+
+def _port_open(port) -> bool:
+    for h in ("127.0.0.1", "localhost"):
+        try:
+            with socket.create_connection((h, port), timeout=0.5):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def browser_up() -> bool:
+    return _port_open(CHROME_DEBUG_PORT) and _port_open(BROWSER_MCP_PORT)
+
+
+def ensure_browser():
+    """Reopen the automation Chrome and/or Playwright MCP if they're gone --
+    e.g. the user closed the Chrome window by mistake. Called before every
+    turn, so the next instruction just works instead of Claude answering "the
+    browser service isn't running, restart it yourself". A dead Chrome also
+    means Playwright MCP's CDP connection is dead, so MCP is restarted with it.
+    Returns an error message, or None when the browser is (now) up."""
+    if os.environ.get("ANZO_NO_AUTOMATION") == "1":
+        return None
+    with _browser_lock:
+        chrome_ok = _port_open(CHROME_DEBUG_PORT)
+        mcp_ok = _port_open(BROWSER_MCP_PORT)
+        if chrome_ok and mcp_ok:
+            return None
+        if not chrome_ok:
+            print("El Chrome de trabajo no responde; reabriendolo.")
+            _stop(_procs.get("chrome"), "Chrome")
+            _procs["chrome"] = start_chrome()
+            if not _procs["chrome"]:
+                return "No encontre Chrome instalado."
+            _wait_for_port(CHROME_DEBUG_PORT, 20, "Chrome devtools")
+            _stop(_procs.get("mcp"), "browser MCP")
+            mcp_ok = False
+        if not mcp_ok:
+            print("Playwright MCP no responde; reiniciandolo.")
+            _procs["mcp"] = start_browser_mcp()
+            if not _procs["mcp"]:
+                return "No pude iniciar las herramientas del navegador (falta npx/Node.js)."
+            if not _wait_for_port(BROWSER_MCP_PORT, 60, "Playwright MCP"):
+                return "Las herramientas del navegador no respondieron a tiempo."
+        return None
+
+
 def _boot(procs):
     """Everything slow (automation Chrome, Playwright MCP, router). Runs in a
     background thread so the window is already open while this works."""
@@ -600,7 +663,7 @@ def main():
     print(f"ANZO listening on http://{HOST}:{PORT}")
     threading.Thread(target=server.serve_forever, daemon=True).start()
     threading.Thread(target=_summary_loop, daemon=True).start()
-    procs = {}
+    procs = _procs
     threading.Thread(target=_boot, args=(procs,), daemon=True).start()
 
     ui_proc = open_ui()

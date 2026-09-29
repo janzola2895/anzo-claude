@@ -189,6 +189,9 @@ BROWSER_SYSTEM_PROMPT = (
     "y los archivos de texto (HTML, notas) con Write en esa misma carpeta. Es la "
     "unica carpeta donde puedes guardar; no intentes copiar con comandos de "
     "shell. "
+    "Si las herramientas del navegador fallan porque no hay conexion, no le "
+    "pidas al usuario que reinicie nada: dile que repita la instruccion, ANZO "
+    "reabre el navegador solo antes del siguiente pedido. "
     "Tus respuestas se leen en voz alta: responde en frases cortas y "
     "naturales, sin markdown ni listas."
 )

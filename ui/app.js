@@ -348,9 +348,20 @@ function onFinalUtterance(text) {
       setConversationMode(false);
       return;
     }
-    // Any other speech while a turn is running is an interrupt: stop it
-    // and treat this utterance as the new instruction, same session.
-    startTurn(text);
+    // Interrupting needs the wake word, in both modes. It used to be any
+    // speech at all, and background conversation in the room ("champiñones
+    // Camilo se quiere ir...") killed a running task and was sent to Claude
+    // as the new instruction. "Anzo, <instrucción>" replaces the task;
+    // "Anzo" alone or "Anzo para/detente/basta" just stops it.
+    const rest = stripWakeWord(text);
+    if (rest === null) return;
+    if (!rest || isPhrase(rest, "para", "detente", "basta", "stop", "cancela", "silencio")) {
+      logLine("sys", "(detenido)");
+      interruptCurrentTurn();
+      finishTurn("Detenido.");
+      return;
+    }
+    startTurn(rest);
     return;
   }
 

@@ -95,6 +95,14 @@ Se agregó a CCR el proveedor `OVH sin registro` (`https://oai.endpoints.kepler.
 
 **Estado:** el proveedor queda configurado pero no aporta nada hasta corregir el protocolo y solo si el límite por IP se libera. Sin suscripción ni cupo de Gemini, ANZO no tiene backend hasta que se reinicien (Gemini: medianoche hora del Pacífico, ~2 a.m. Colombia).
 
+## Se cerró el Chrome de trabajo y ANZO no lo volvía a abrir (2026-09-29)
+
+**Síntoma:** el usuario cerró por error la ventana de Chrome que ANZO controla; en el siguiente pedido Claude respondió que "el servicio del navegador no está corriendo" y pidió reiniciarlo a mano.
+
+**Causa:** Chrome y Playwright MCP solo se lanzaban una vez al arrancar ANZO. Con Chrome cerrado, Playwright MCP seguía arriba pero con la conexión CDP muerta.
+
+**Arreglo (`server.py`):** `ensure_browser()` se ejecuta antes de cada turno. Si el puerto de Chrome (9223) no responde, reabre Chrome y reinicia Playwright MCP; si solo falta Playwright MCP, lo reinicia. En la ventana aparece "⚠ Reabriendo el navegador de trabajo…". Tarda 6 a 8 s. Además el prompt le dice a Claude que, si el navegador falla a mitad de un turno, pida repetir la instrucción en vez de pedir reinicios. Probado con un Chrome de prueba (otro perfil y puertos, `ANZO_BROWSER_PROFILE`/`ANZO_CHROME_DEBUG_PORT`/`ANZO_BROWSER_MCP_PORT`) en los tres casos: nada arriba, Chrome cerrado, solo MCP caído. Límite: si Chrome se cierra **durante** un turno, ese turno falla; el siguiente ya lo encuentra reabierto.
+
 ## Otras notas sueltas
 
 - La CLI de `claude` no viene con la app de escritorio — hay que instalarla aparte (`npm install -g @anthropic-ai/claude-code`) y loguearla una vez.

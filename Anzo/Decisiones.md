@@ -144,6 +144,12 @@ Implementados los 4 pedidos priorizados de la lista de pendientes anterior. El p
 
 **Probado de punta a punta** (instancia de prueba, Gemini y OVH sin cupo): primer turno → router → `api_retry rate_limit` → membresía respondió; segundo turno → se saltó el router por el enfriamiento y respondió la membresía en ~3 s. No medido: cuánto tarda exactamente el primer intento por el router antes del `api_retry` (CCR respeta el `Retry-After` de Google, del orden de 40 s).
 
+## Cambio de diseño: interrumpir exige la palabra clave (2026-09-29)
+
+Reportado en vivo: con una tarea corriendo, una conversación de fondo en la sala ("champiñones Camilo se quiere ir o hay sándwich con queso...") interrumpió la tarea y se mandó a Claude como instrucción nueva. Causa: por diseño, mientras ANZO estaba `WORKING` cualquier frase lo interrumpía (requisito original de "interrupción en caliente").
+
+**Decisión:** la interrupción en caliente se mantiene, pero ahora requiere la palabra clave, en modo normal y en modo conversación. "Anzo, <instrucción>" cambia la tarea en curso; "Anzo" solo, o "Anzo para/detente/basta/cancela/silencio", la detiene sin mandar nada nuevo. Cualquier otra frase durante una tarea se ignora. "pausa" y "cambio y fuera" siguen funcionando sin palabra clave en modo conversación. Probado en el navegador aislado simulando cada caso.
+
 ## Cambio de diseño: modo normal ya no tiene ventana de gracia (2026-09-29)
 
 El usuario reportó que en modo normal (no modo conversación) Anzo a veces seguía reaccionando sin que dijera la palabra clave. Causa: después de cada turno, `finishTurn()` dejaba a Anzo en `LISTENING` (sin pedir "Anzo") durante 12 segundos de gracia (`FOLLOW_UP_WINDOW_MS`) antes de volver a `IDLE` -- pensado originalmente para responder una pregunta rápido, pero era también una ventana donde cualquier habla suelta (o un eco que el filtro no cachara) se tomaba como instrucción nueva sin que el usuario lo pidiera.
