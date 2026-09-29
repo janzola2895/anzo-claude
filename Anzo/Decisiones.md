@@ -86,3 +86,15 @@ Implementados los 4 pedidos priorizados de la lista de pendientes anterior. El p
 - Avisar **antes** de llegar al límite semanal de uso, no solo cuando ya se cortó — investigado el 2026-09-28: ni `claude auth status` ni `claude --help` exponen un porcentaje de uso restante; falta confirmar si `/usage` funciona en modo headless (`claude -p`) y da un número aprovechable
 - El filtro de eco (para no confundir la propia voz de Anzo con una interrupción) sigue siendo una heurística de texto, no cancelación acústica real — usar audífonos sigue siendo lo más confiable si llega a molestar
 - Probar en vivo que la tarea programada arranca sola en el próximo inicio de sesión de Windows (quedó verificada como registrada y `Ready`, pero no probada con un logon real todavía)
+- Si la pestaña de la interfaz de voz queda minimizada/en segundo plano por un rato largo, Chrome puede retrasar temporizadores (`setTimeout`) del propio `app.js` — confirmado en pruebas que esto puede demorar mucho la recuperación de `inEchoWindow` (ver bug de abajo). En uso normal la pestaña suele quedar visible, pero si Anzo deja de reaccionar después de estar mucho tiempo sin usarse, esta es la primera sospechosa
+
+## Bug real: Anzo se escuchaba a sí mismo y se autorespondía (2026-09-29)
+
+Reportado en vivo: tras una respuesta corta de Anzo, el micrófono recogió la cola de su propia voz saliendo por los parlantes y la tomó como un mensaje nuevo del usuario — Anzo le contestó a su propia frase, esa respuesta se volvió a autoescuchar, y así en cadena. No era eco de la sala (el usuario confirmó que no estaba en un lugar con eco): era la propia voz de Anzo filtrándose del parlante al micrófono, sin auriculares.
+
+**Causa real:** el filtro de eco (`looksLikeEcho`, pensado exactamente para este caso) solo se revisaba dentro de la rama `state === WORKING` de `onFinalUtterance`. Pero el evento `complete` de un turno (que mueve el estado a `LISTENING`) llega apenas termina el *texto*, mientras que `speechSynthesis` sigue leyéndolo en voz alta varios segundos más — el hueco de eco real está sobre todo *después* de `WORKING`, justo donde el filtro no se aplicaba.
+
+**Arreglo en `ui/app.js`:**
+- `looksLikeEcho()` ahora se revisa primero en `onFinalUtterance`, antes de mirar el estado — cubre `LISTENING`, modo conversación, e incluso `IDLE` (una respuesta de Anzo que mencione "viernes" de pasada no debería auto-activarlo).
+- La ventana de eco (`inEchoWindow`) ya no depende del estado de la conversación sino de si `speechSynthesis` realmente está reproduciendo algo, vía los eventos `onend`/`onerror` de cada `SpeechSynthesisUtterance`.
+- **Segundo bug encontrado probando el arreglo:** en pruebas, `onend`/`onerror` a veces no dispararon nunca aunque `speechSynthesis.speaking` ya había vuelto a `false` — un punto débil conocido de Chrome, no exclusivo del entorno de prueba. Sin red de seguridad, eso deja `inEchoWindow` trabado en `true` para siempre y Anzo deja de reaccionar a todo. Arreglo: un `setTimeout` de respaldo (~70ms por carácter, mínimo 3s) que libera la ventana igual si el evento nunca llega.

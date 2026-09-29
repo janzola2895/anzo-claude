@@ -97,7 +97,27 @@ if (window.speechSynthesis) {
 // text-similarity check against what should currently be audible.
 let recentlySpoken = "";
 
+// A turn's "complete" event (state -> LISTENING) fires as soon as Claude's
+// text is done, but speechSynthesis keeps reading it aloud for several more
+// seconds after that -- so the mic can pick up Anzo's own voice well after
+// the state machine has already moved past WORKING. inEchoWindow tracks
+// actual audio playback (via each utterance's onend), not turn state, so
+// looksLikeEcho() stays accurate regardless of which state we're in by the
+// time the speakers are still going.
+let inEchoWindow = false;
+let pendingUtterances = 0;
+let echoGraceTimer = null;
+const ECHO_GRACE_MS = 1200; // trailing audio / mic lag after the last utterance ends
+// Safety net: speechSynthesis's onend/onerror don't always fire (confirmed
+// live -- speaking went back to false but neither event followed). Without
+// a fallback, one missed event wedges inEchoWindow "true" forever and Anzo
+// stops responding to everything, permanently. ~70ms/char is a slow, safe
+// reading pace so this fires only once the utterance should clearly be over.
+const FALLBACK_MS_PER_CHAR = 70;
+const FALLBACK_MIN_MS = 3000;
+
 function looksLikeEcho(heard) {
+  if (!inEchoWindow) return false;
   const n = normalize(heard).trim();
   if (n.length < 4) return false; // too short to judge either way
   return recentlySpoken.includes(n);
@@ -110,6 +130,22 @@ function speak(rawText) {
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "es-CO";
   if (spanishVoice) u.voice = spanishVoice;
+  pendingUtterances++;
+  inEchoWindow = true;
+  clearTimeout(echoGraceTimer);
+  let settled = false;
+  const onSettle = () => {
+    if (settled) return; // onend/onerror and the fallback timer can both fire -- count once
+    settled = true;
+    pendingUtterances = Math.max(0, pendingUtterances - 1);
+    if (pendingUtterances === 0) {
+      clearTimeout(echoGraceTimer);
+      echoGraceTimer = setTimeout(() => { inEchoWindow = false; }, ECHO_GRACE_MS);
+    }
+  };
+  u.onend = onSettle;
+  u.onerror = onSettle;
+  setTimeout(onSettle, Math.max(FALLBACK_MIN_MS, text.length * FALLBACK_MS_PER_CHAR));
   window.speechSynthesis.speak(u);
 }
 
@@ -263,6 +299,15 @@ function toggleConversationModeFromUI() {
 
 function onFinalUtterance(text) {
   if (!text.trim()) return;
+  // Checked first, regardless of state: a turn's "complete" event (and the
+  // state change that comes with it) fires as soon as the text is done, but
+  // speechSynthesis keeps reading it aloud for several seconds afterward --
+  // so Anzo's own voice can leak into the mic well after WORKING has ended
+  // (this is what "se esta escuchando a si mismo" turned out to be: the
+  // echo check used to only run during WORKING and missed that window
+  // entirely). Also guards IDLE: a reply that happens to contain a wake
+  // word ("viernes" is an ordinary Spanish word) shouldn't wake Anzo up.
+  if (looksLikeEcho(text)) return;
 
   // Paused inside conversation mode: ignore everything except the phrase
   // that wakes it back up (no wake word needed, same as the rest of
@@ -273,7 +318,6 @@ function onFinalUtterance(text) {
   }
 
   if (state === State.WORKING) {
-    if (looksLikeEcho(text)) return; // Anzo's own voice bleeding into the mic, not a real interrupt
     if (conversationMode && isPhrase(text, "pausa")) {
       interruptCurrentTurn();
       finishTurn("En pausa.");
