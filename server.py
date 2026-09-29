@@ -375,7 +375,10 @@ def main():
               "(la primera vez puede tardar mientras npx descarga el paquete)...")
         _wait_for_port(BROWSER_MCP_PORT, 60, "Playwright MCP")
     if start_router():
-        _wait_for_port(brain.ROUTER_PORT, 30, "claude-code-router gateway")
+        if not _wait_for_port(brain.ROUTER_PORT, 15, "claude-code-router gateway"):
+            print("AVISO: el gateway del router no esta arriba. CCR no lo levanta hasta "
+                  "que haya al menos un proveedor con modelo configurado: corre `ccr ui`, "
+                  "agrega uno y pulsa Start en la pagina Server.")
         if not brain.ROUTER_KEY:
             print("AVISO: ANZO_ROUTER_KEY vacio. Si el router exige clave de cliente "
                   "(pagina API Keys de `ccr ui`), crea una y exportala.")
