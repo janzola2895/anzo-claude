@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "AnzoBot",
+  "version": "1.0.0",
+  "description": "Renombra el grupo de pestañas \"Claude\" que crea la extensión Claude in Chrome a \"AnzoBot\" (ANZO + Claude).",
+  "permissions": ["tabGroups"],
+  "background": { "service_worker": "background.js" },
+  "icons": { "128": "icon.png" }
+}

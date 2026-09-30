@@ -10,6 +10,16 @@ Cómo usar esta versión en el día a día. Detalle técnico en [[Arquitectura A
 - Cerrar la ventana cierra ANZO. Tu Chrome y sus pestañas quedan abiertos.
 - No arranca solo con Windows.
 
+## Grupo de pestañas "AnzoBot"
+
+Las pestañas donde trabaja ANZO se agrupan en Chrome. La extensión Claude in Chrome llama a ese grupo "Claude"; la mini extensión **AnzoBot** (carpeta `chrome-extension/` del proyecto) lo renombra a "AnzoBot" y conserva el indicador de estado: ⌛ trabajando, 🔔 te necesita, ✅ terminó. Se instala una sola vez:
+
+1. En Chrome abre `chrome://extensions`.
+2. Activa **Modo de desarrollador** (arriba a la derecha).
+3. Pulsa **Cargar descomprimida** y elige la carpeta `C:\dev\anzo-claude\chrome-extension`.
+
+Si Chrome no deja activar el Modo de desarrollador, es una política del equipo de la empresa: el grupo seguirá diciendo "Claude" (puedes renombrarlo a mano con clic derecho sobre el nombre del grupo).
+
 ## Hablarle
 
 | Qué dices | Qué pasa |

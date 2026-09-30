@@ -160,6 +160,10 @@ Implementados los 4 pedidos priorizados de la lista de pendientes anterior. El p
 
 **Probado de punta a punta** (sin ventana, con el Chrome real): abrir example.com (14 s), guardar captura en el escritorio (14 s, llegó a `ANZO archivos`), cerrar la pestaña al pedirlo (10 s); modelo `claude-sonnet-5`; **cero** peticiones al router durante la prueba. No probado aquí: voz real en la ventana nueva y tareas de Power Platform.
 
+## El grupo de pestañas se llama "AnzoBot", no "Claude" (2026-09-29)
+
+Pedido del usuario: que el grupo de pestañas donde trabaja ANZO no diga "Claude" sino "AnzoBot". El nombre lo pone la extensión Claude in Chrome y no se puede configurar, así que se agregó una mini extensión propia (`chrome-extension/`, solo permiso `tabGroups`) que lo renombra y conserva los prefijos de estado. El usuario la instala una vez con "Cargar descomprimida" en `chrome://extensions` (requiere Modo de desarrollador). Detalle y prueba en [[Arquitectura ANZO + Claude]].
+
 ## Investigación: Claude in Chrome (la extensión) como navegador de ANZO (2026-09-29)
 
 Pregunta del usuario: ¿puede ANZO usar la extensión Claude in Chrome en vez del Chrome aparte + Playwright MCP? Probado en esta máquina (CLI 2.1.283, extensión 1.0.94 en el perfil Default de Chrome). Sin cambios de código todavía.

@@ -53,6 +53,12 @@ claude-code-router, al instalarse, reescribió la configuración **global** de C
 
 La extensión agrupa las pestañas que abre Claude en un grupo ligado a la sesión. Como cada turno reanuda la misma sesión (`--resume`), el siguiente turno ve el mismo grupo y las mismas pestañas (probado). Al terminar un proceso, la CLI no cierra un grupo que tenga páginas. El prompt de ANZO le prohíbe a Claude cerrar pestañas salvo que el usuario lo pida, porque la skill `chrome-browser` (que se carga sola) le dice lo contrario. Claude solo actúa sobre las pestañas de su grupo: no ve las que el usuario abrió por su cuenta.
 
+## Nombre del grupo: AnzoBot
+
+La extensión Claude in Chrome (v1.0.97, leído en su código) pone el título fijo "Claude" al crear o re-crear un grupo y después solo cambia un prefijo de estado (⌛, 🔔, ✅) delante del nombre que tenga; identifica sus grupos por id, nunca por nombre, y no tiene ninguna opción ni política para cambiar ese nombre (su esquema administrado solo trae `blockedUrlPatterns` y `forceLoginOrgUUID`). La mini extensión `chrome-extension/` (MV3, permiso `tabGroups` y nada más) escucha `tabGroups.onCreated/onUpdated` y cambia "Claude" por "AnzoBot" conservando el prefijo. No toca "Claude (MCP)" (esos grupos la extensión los mantiene con su nombre) ni nombres puestos por el usuario. Efecto secundario: los grupos del panel lateral de Claude in Chrome, que la extensión renombra con el título de la conversación solo si siguen llamándose "Claude", también quedan como "AnzoBot".
+
+Probado en un Chrome real de prueba (cargada con `--remote-debugging-pipe` + `Extensions.loadUnpacked`; `--load-extension` ya no funciona en Chrome): Claude → AnzoBot, ⌛Claude → ⌛AnzoBot, 🔔Claude → 🔔AnzoBot, ✅AnzoBot, "Claude (MCP)" y "Mi grupo" sin cambios, y un segundo "Claude" vuelve a quedar AnzoBot.
+
 ## Archivos y capturas
 
 - Única carpeta de escritura: `Escritorio\ANZO archivos` (el Escritorio real, en OneDrive, se lee del registro de Windows).
@@ -75,6 +81,7 @@ La extensión agrupa las pestañas que abre Claude en un grupo ligado a la sesi�
 | `ui/app.js` | Palabra clave, interrupción, modo conversación, voz, línea del modelo |
 | `ui/orb.js`, `ui/style.css` | Orbe animado y aspecto de la ventana |
 | `.claude/skills/trading-chart-analysis/` | Skill de análisis técnico de gráficos |
+| `chrome-extension/` | Mini extensión AnzoBot: renombra el grupo de pestañas "Claude" a "AnzoBot" |
 | `scripts/install-shortcut.ps1` | Crea el acceso directo del Escritorio |
 | `.env` (opcional, no versionado) | `ANZO_MODEL`, `ANZO_PORT`, `ANZO_CHROME_PROFILE`, `ANZO_OUTPUT_DIR` — ver `.env.example` |
 

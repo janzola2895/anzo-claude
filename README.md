@@ -29,6 +29,14 @@ No arranca solo con Windows.
 
 Opciones (todas opcionales) en `.env`, ver `.env.example`: `ANZO_MODEL`, `ANZO_PORT` (8740; la ANZO original usa 8730), `ANZO_CHROME_PROFILE`, `ANZO_OUTPUT_DIR`.
 
+## Grupo de pestañas "AnzoBot"
+
+La extensión Claude in Chrome llama "Claude" al grupo de pestañas donde trabaja. La mini extensión de `chrome-extension/` (solo pide permiso sobre grupos de pestañas) lo renombra a **AnzoBot** y conserva los indicadores de estado (⌛ trabajando, 🔔 te necesita, ✅ terminó). Se instala una vez:
+
+1. En Chrome abre `chrome://extensions`.
+2. Activa **Modo de desarrollador** (arriba a la derecha).
+3. Pulsa **Cargar descomprimida** y elige la carpeta `C:\dev\anzo-claude\chrome-extension`.
+
 ## Notas
 
 Ver `Anzo/` (vault de Obsidian): `Decisiones.md` explica por qué existe esta versión y cómo se probó.
