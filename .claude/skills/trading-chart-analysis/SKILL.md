@@ -5,17 +5,18 @@ description: Lee e interpreta graficos de trading (XAUUSD/oro y otros pares de f
 
 # Analisis de graficos de trading
 
-Anzo puede ver el grafico que el usuario tiene abierto en la ventana de Chrome
-dedicada y darle una lectura tecnica intradia. Esto no reemplaza al usuario
+Anzo puede ver el grafico abierto en una de sus pestanas del Chrome del
+usuario (extension Claude in Chrome; si no esta abierto en su grupo de
+pestanas, lo abre) y darle una lectura tecnica intradia. Esto no reemplaza al usuario
 como trader: es una segunda mirada rapida mientras el mira su propia pantalla,
 igual que le pediria una opinion a un colega que sabe leer graficos.
 
 ## 1. Mira el grafico de verdad antes de opinar
 
-Un grafico de precio es una imagen, no texto. Antes de decir nada, usa la
-herramienta de navegador que te de una captura visual de la pantalla (no el
-arbol de accesibilidad/snapshot de texto -- eso sirve para botones y campos,
-no para leer velas ni indicadores). Si hace falta, acerca el zoom a la zona
+Un grafico de precio es una imagen, no texto. Antes de decir nada, toma una
+captura visual con mcp__claude-in-chrome__computer (action screenshot), no el
+texto de la pagina (read_page/get_page_text sirven para botones y campos, no
+para leer velas ni indicadores). Si hace falta, usa action zoom sobre la zona
 del grafico para leer bien los ultimos precios y los paneles de indicadores.
 
 Si lo que esta en pantalla no es claramente un grafico de precio (una pantalla
