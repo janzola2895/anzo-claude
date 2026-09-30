@@ -103,6 +103,16 @@ Se agregó a CCR el proveedor `OVH sin registro` (`https://oai.endpoints.kepler.
 
 **Arreglo (`server.py`):** `ensure_browser()` se ejecuta antes de cada turno. Si el puerto de Chrome (9223) no responde, reabre Chrome y reinicia Playwright MCP; si solo falta Playwright MCP, lo reinicia. En la ventana aparece "⚠ Reabriendo el navegador de trabajo…". Tarda 6 a 8 s. Además el prompt le dice a Claude que, si el navegador falla a mitad de un turno, pida repetir la instrucción en vez de pedir reinicios. Probado con un Chrome de prueba (otro perfil y puertos, `ANZO_BROWSER_PROFILE`/`ANZO_CHROME_DEBUG_PORT`/`ANZO_BROWSER_MCP_PORT`) en los tres casos: nada arriba, Chrome cerrado, solo MCP caído. Límite: si Chrome se cierra **durante** un turno, ese turno falla; el siguiente ya lo encuentra reabierto.
 
+## "Anzo, para" decía "Interrumpido" pero Claude seguía trabajando (2026-09-30)
+
+**Síntoma:** no se vio a simple vista; apareció revisando por qué un bucle se comió tokens. La ventana mostraba "Interrumpido", pero Claude podía seguir haciendo clics en Chrome por detrás hasta terminar la tarea por su cuenta.
+
+**Causa:** en Windows, `brain.py` lanza `claude` con `shell=True` (hace falta para el shim `claude.cmd`), así que el proceso que guarda es el `cmd.exe` de adelante. `proc.terminate()` solo mataba ese `cmd.exe`; el `claude` de verdad quedaba vivo y huérfano. Mismo problema que ya tuvo la ANZO original con el `node.exe` de Playwright MCP.
+
+**Arreglo:** `brain._kill_tree()` usa `taskkill /PID <pid> /T /F` (todo el árbol) y la usan la interrupción, el timeout de inactividad, el límite de uso, el tope de acciones y la limpieza final.
+
+**Probado** con un `claude` falso que escribe un contador en cada acción: con el código anterior el contador siguió subiendo después de cancelar (91 → 161); con el arreglo se queda quieto.
+
 ## Otras notas sueltas
 
 - La CLI de `claude` no viene con la app de escritorio — hay que instalarla aparte (`npm install -g @anthropic-ai/claude-code`) y loguearla una vez.

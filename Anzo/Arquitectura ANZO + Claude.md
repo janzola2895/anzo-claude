@@ -70,6 +70,10 @@ Probado en un Chrome real de prueba (cargada con `--remote-debugging-pipe` + `Ex
 
 `claude -p` no puede mostrar avisos de aprobación: lo que no está permitido de antemano se rechaza en silencio. Permitido: todas las herramientas de la extensión, `Skill` (para la skill de trading) y escribir en `ANZO archivos`. Los sitios siguen sujetos a los permisos por sitio de la propia extensión: si Chrome pide permiso para un sitio nuevo, lo aceptas ahí.
 
+## Reintentos y tope de acciones
+
+El prompt le pide a Claude máximo 3 intentos por paso antes de pedir ayuda. Como respaldo, `brain.py` corta el turno al llegar a `ANZO_MAX_TOOL_CALLS` llamadas de herramienta (60) y pregunta si sigue; el siguiente mensaje en esa sesión lleva una nota para Claude. Cortar = `_kill_tree()` (`taskkill /T /F`), porque en Windows `terminate()` dejaba vivo a `claude` detrás del `cmd.exe`. Detalle en [[Decisiones]].
+
 ## Archivos clave
 
 | Archivo | Qué hace |
@@ -83,7 +87,7 @@ Probado en un Chrome real de prueba (cargada con `--remote-debugging-pipe` + `Ex
 | `.claude/skills/trading-chart-analysis/` | Skill de análisis técnico de gráficos |
 | `chrome-extension/` | Mini extensión AnzoBot: renombra el grupo de pestañas "Claude" a "AnzoBot" |
 | `scripts/install-shortcut.ps1` | Crea el acceso directo del Escritorio |
-| `.env` (opcional, no versionado) | `ANZO_MODEL`, `ANZO_PORT`, `ANZO_CHROME_PROFILE`, `ANZO_OUTPUT_DIR` — ver `.env.example` |
+| `.env` (opcional, no versionado) | `ANZO_MODEL`, `ANZO_PORT`, `ANZO_CHROME_PROFILE`, `ANZO_OUTPUT_DIR`, `ANZO_MAX_TOOL_CALLS` — ver `.env.example` |
 
 ## Pendiente / no probado todavía
 

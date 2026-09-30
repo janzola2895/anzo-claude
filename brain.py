@@ -138,10 +138,41 @@ SYSTEM_PROMPT = (
     "guardar; no intentes copiar con comandos de shell. "
     "Si las herramientas del navegador no responden, dile al usuario que revise "
     "que Chrome este abierto y repita la instruccion; no le pidas reiniciar nada. "
+    # A 2026-09-29 turn spent ~190 tool calls clicking the same Power Apps
+    # formula bar over and over (every call re-reads the whole context, so a
+    # loop like that burned ~20% of the session). MAX_TOOL_CALLS below is the
+    # hard backstop; this is the rule that should stop it much earlier.
+    "Si un paso no te sale (un clic que no hace nada, una formula que no queda, "
+    "un boton que no encuentras), intentalo como maximo 3 veces y cada vez de "
+    "una forma distinta; nunca repitas la misma accion esperando otro resultado. "
+    "Si al tercer intento sigue sin funcionar, detente ahi y no sigas probando "
+    "variaciones: dile al usuario en una o dos frases que paso intentabas, que "
+    "probaste y que falla, y pidele que lo haga el o que te diga como. Cada "
+    "accion gasta tokens de su membresia. Para ahorrar, agrupa en una sola "
+    "llamada con browser_batch las acciones que puedas prever (por ejemplo "
+    "clic, escribir y Enter) y no tomes dos capturas seguidas sin haber hecho "
+    "nada entre ellas. "
     "Tus respuestas se leen en voz alta: responde en frases cortas y "
     "naturales, sin markdown ni listas."
 )
 IDLE_TIMEOUT_S = int(os.environ.get("ANZO_IDLE_TIMEOUT", "180"))
+
+# Hard cap on tool calls in a single turn (0 = no cap). Past it ANZO stops the
+# turn and asks the user whether to go on, so a Claude stuck retrying the same
+# step can't drain the membership on its own. Counted per tool call, not per
+# browser action: each call is one more request that re-reads the whole
+# context, which is where the tokens go. Real app builds took 100-150 calls
+# before browser_batch was suggested, so they may need one "Anzo, sigue".
+MAX_TOOL_CALLS = int(os.environ.get("ANZO_MAX_TOOL_CALLS", "").strip() or 60)
+
+# Sessions whose last turn hit MAX_TOOL_CALLS. The next message on that session
+# carries a note saying so, so Claude doesn't pick the same loop back up. One
+# line with no "%": it goes through cmd.exe as a -p argument (see summarize()).
+_capped_sessions: set = set()
+_CAPPED_NOTE = ("(Nota de ANZO: detuve tu turno anterior porque llego al maximo "
+                "de acciones sin terminar. Si estabas repitiendo intentos sobre el "
+                "mismo paso, no insistas igual: prueba otra forma o pidele ayuda "
+                "al usuario.) ")
 
 # "Screenshot saved to: C:\...\claude-chrome-screenshots-XXXX\screenshot-N.jpg"
 # -- the text the extension's screenshot tool returns with save_to_disk=true.
@@ -231,6 +262,25 @@ def build_command(message: str, session_id: str | None = None) -> list[str]:
     return cmd
 
 
+def _kill_tree(proc: subprocess.Popen):
+    """Stop a claude subprocess for real. On Windows `proc` is the cmd.exe that
+    shell=True puts in front of claude.cmd: proc.terminate() only kills that
+    cmd.exe and leaves claude itself running (and clicking) in the background,
+    orphaned. taskkill /T takes the whole tree down -- the same fix the
+    original ANZO needed for Playwright MCP's node.exe."""
+    if IS_WINDOWS:
+        try:
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
 def cancel_active() -> bool:
     """Interrupt whatever ANZO is currently doing. Called when new speech
     arrives mid-turn. Killing the subprocess is the whole mechanism -- the
@@ -239,11 +289,8 @@ def cancel_active() -> bool:
         proc = _active_proc
     if proc is None or proc.poll() is not None:
         return False
-    try:
-        proc.terminate()
-        return True
-    except OSError:
-        return False
+    _kill_tree(proc)
+    return True
 
 
 def _collect_screenshot(block) -> str | None:
@@ -292,6 +339,9 @@ def run(message: str, session_id: str | None = None):
     """
     global _active_proc
 
+    if session_id in _capped_sessions:
+        _capped_sessions.discard(session_id)
+        message = _CAPPED_NOTE + message
     cmd = build_command(message, session_id)
     popen_kwargs = dict(
         cwd=WORKDIR,
@@ -353,6 +403,7 @@ def run(message: str, session_id: str | None = None):
     emitted_session = session_id
     streamed_text = False
     text_seen = False
+    tool_calls = 0
 
     try:
         while not done.is_set() or out_q:
@@ -371,7 +422,7 @@ def run(message: str, session_id: str | None = None):
                         yield dict(t="interrupted")
                         return
                 if time.monotonic() - last_activity > IDLE_TIMEOUT_S:
-                    proc.kill()
+                    _kill_tree(proc)
                     yield dict(t="error", message=(
                         f"claude went quiet for {IDLE_TIMEOUT_S}s and was stopped. "
                         + " | ".join(list(err_buf)[-3:])
@@ -432,15 +483,30 @@ def run(message: str, session_id: str | None = None):
                     btype = block.get("type")
                     if (btype == "text" and not text_seen and is_limit_error(block.get("text"))):
                         # Quota message arrives as a synthetic assistant turn.
-                        proc.terminate()
+                        _kill_tree(proc)
                         yield dict(t="error", message=_limit_message(block["text"].strip()))
                         return
                     if btype == "text" and not streamed_text and block.get("text"):
                         text_seen = True
                         yield dict(t="delta", text=block["text"])
                     elif btype == "tool_use":
+                        tool_calls += 1
                         yield dict(t="tool", phase="use", name=block.get("name", "tool"),
                                    input=block.get("input", {}))
+                        if MAX_TOOL_CALLS and tool_calls >= MAX_TOOL_CALLS:
+                            # A normal "complete", not an error: the session is
+                            # fine and "Anzo, sigue" resumes it where it stopped.
+                            _kill_tree(proc)
+                            if _valid_session(emitted_session):
+                                _capped_sessions.add(emitted_session)
+                            yield dict(t="delta", text=(
+                                f"\nLlevo {tool_calls} acciones en esta tarea y todavía "
+                                "no termino, así que paré para no gastar tus tokens "
+                                "de más. Si voy bien, dime: Anzo, sigue. Si me ves "
+                                "enredado, dime cómo hacerlo o hazlo tú."))
+                            yield dict(t="complete", session_id=emitted_session,
+                                       ms=int((time.monotonic() - started) * 1000))
+                            return
                 continue
 
             if kind == "user":
@@ -472,7 +538,7 @@ def run(message: str, session_id: str | None = None):
                 return
 
         if pump_error:
-            proc.kill()
+            _kill_tree(proc)
             yield dict(t="error", message=f"lost the claude output stream: {pump_error[0]}"[:400])
             return
 
@@ -482,7 +548,7 @@ def run(message: str, session_id: str | None = None):
             # pump_out saw EOF (done.set()) but the process itself hasn't
             # exited yet -- give it a moment, then stop waiting on it rather
             # than crash the request thread.
-            proc.kill()
+            _kill_tree(proc)
             yield dict(t="error", message="claude did not exit after finishing output")
             return
         if rc not in (0, None):
@@ -502,7 +568,12 @@ def run(message: str, session_id: str | None = None):
                    ms=int((time.monotonic() - started) * 1000))
     finally:
         if proc.poll() is None:
-            proc.terminate()
+            # Usually the CLI is just exiting after its "result" event; give
+            # it a moment to finish writing the session before forcing it.
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                _kill_tree(proc)
         with _active_lock:
             if _active_proc is proc:
                 _active_proc = None

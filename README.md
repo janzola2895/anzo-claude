@@ -26,8 +26,9 @@ No arranca solo con Windows.
 - Claude abre sus pestañas en un grupo propio dentro de tu Chrome y las deja abiertas entre turnos.
 - Solo puede guardar en `Escritorio\ANZO archivos`: las capturas que pidas se copian ahí solas y los archivos de texto se escriben ahí.
 - La pantalla muestra qué modelo respondió el último turno.
+- Si un paso no le sale en 3 intentos, se detiene y pide ayuda. Como respaldo, a las 60 acciones en un mismo pedido para y pregunta si sigue ("Anzo, sigue"), para que un bucle no se coma el cupo.
 
-Opciones (todas opcionales) en `.env`, ver `.env.example`: `ANZO_MODEL`, `ANZO_PORT` (8740; la ANZO original usa 8730), `ANZO_CHROME_PROFILE`, `ANZO_OUTPUT_DIR`.
+Opciones (todas opcionales) en `.env`, ver `.env.example`: `ANZO_MODEL`, `ANZO_PORT` (8740; la ANZO original usa 8730), `ANZO_CHROME_PROFILE`, `ANZO_OUTPUT_DIR`, `ANZO_MAX_TOOL_CALLS` (60; 0 = sin tope).
 
 ## Grupo de pestañas "AnzoBot"
 

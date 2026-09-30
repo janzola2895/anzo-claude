@@ -261,3 +261,21 @@ set ANZO_ROUTER_MODEL=<modelo tal como lo nombra CCR>   # opcional
 **Parche local a CCR 3.1.1 (importante):** las claves nuevas de AI Studio empiezan con `AQ.`, no `AIza`. CCR solo trataba `AIza` como clave de Gemini y a las demás les agregaba `Authorization: Bearer` además de `x-goog-api-key`; Google rechaza las dos credenciales juntas (401). Se parcheó `%APPDATA%\npm\node_modules\@musistudio\claude-code-router\dist\main\cli.js` y `upstream-header-sanitizer.js` para tratar `AIza` y `AQ.` igual. Hay copias `*.bak-anzo` al lado. **Una actualización de CCR con npm borra el parche.**
 
 **Sin resolver a propósito:** si un proveedor devuelve un límite mientras Anzo va por el router, la CLI sigue reintentando en silencio y Anzo puede volver a quedarse "pensando" en vez de avisar. Con el respaldo de CCR es menos probable, así que no se tocó `brain.py`.
+
+## Límite de reintentos y tope de acciones por turno (2026-09-30)
+
+**Reportado por el usuario:** en uso real, un turno se enredó y repitió lo mismo muchas veces; se gastó ~20% de los tokens de la sesión. Pidió que intente unas 3 a 5 veces como máximo y, si no lo logra, pida ayuda.
+
+**Qué pasó (leído de la transcripción de la sesión `43e16a42`):** el pedido era arreglar el cuerpo del correo en el flujo; Claude se quedó escribiendo la fórmula `OnSelect` del botón en la barra de fórmulas de Power Apps: ~190 llamadas de herramienta seguidas (clics en los mismos puntos, `ctrl+a`, `Delete`, escribir `'PowerAppV2`, capturas) sin avanzar, hasta que se acabó el cupo de la sesión (`You've hit your session limit`). Ninguna llamada dio error, así que un detector de errores no lo habría visto. Lo que lo hizo tan caro: cada llamada es una petición que vuelve a leer todo el contexto, y ese contexto ya iba en ~300-380 mil tokens por las capturas de los turnos anteriores (el turno completo: 208 llamadas, ~104 millones de tokens de entrada, casi todo lectura de caché). Además, ninguna llamada usó `browser_batch` y muchas eran dos capturas seguidas.
+
+**Qué se hizo:**
+- **Regla en el prompt:** si un paso no sale, máximo 3 intentos y cada uno de forma distinta; al tercero se detiene y le dice al usuario qué intentaba, qué probó y qué falla, y le pide ayuda. También: agrupar acciones previsibles con `browser_batch` y no tomar dos capturas seguidas.
+- **Tope duro en `brain.py`** (`ANZO_MAX_TOOL_CALLS`, 60 por defecto, 0 = sin tope): al llegar a 60 llamadas en un turno, ANZO corta el proceso y dice "Llevo 60 acciones en esta tarea y todavía no termino... Si voy bien, dime: Anzo, sigue". Termina como turno normal (no como error), así que la sesión sigue y "Anzo, sigue" retoma donde quedó. El siguiente mensaje en esa sesión lleva una nota para Claude ("detuve tu turno anterior... si estabas repitiendo intentos, no insistas igual") para que no vuelva a entrar al mismo bucle.
+- **Por qué un tope y no un detector de acciones repetidas:** se probó contra las transcripciones reales. Contar clics idénticos marcaba antes el turno sano de construir la app (varios "Insertar" en el mismo lugar) que el bucle. Contar llamadas es simple y predecible; la regla del prompt es la que debería frenar antes.
+- **Por qué 60:** cada intento del bucle ocupaba ~10-15 llamadas, así que 60 son unos 5 intentos. Con el tope, ese turno se habría cortado en la llamada 60 en vez de la 208. Las construcciones reales de apps y flujos tomaron 100-150 llamadas (sin `browser_batch`), así que pueden pedir un "Anzo, sigue"; si molesta, se sube en `.env`.
+- De paso se encontró y arregló que interrumpir no mataba de verdad a Claude en Windows (ver [[Problemas resueltos]]).
+
+**Probado** con un `claude` falso que emite 200 acciones: se corta en 60, el proceso queda muerto, la nota va solo en el siguiente mensaje de esa sesión y la interrupción detiene todo el árbol. **No probado en vivo:** que Claude real respete la regla de 3 intentos y cuánto baja el número de llamadas con `browser_batch`.
+
+**Pendiente, no hecho:** el contexto crece turno a turno con cada captura (`--resume` mantiene todo), así que cada acción cuesta más a medida que avanza la conversación. Empezar una sesión nueva de vez en cuando lo reiniciaría, pero se perdería la continuidad entre pedidos.
+

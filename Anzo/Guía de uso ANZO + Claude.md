@@ -57,6 +57,7 @@ Si Chrome no deja activar el Modo de desarrollador, es una política del equipo 
 - No inicia sesión por ti ni resuelve CAPTCHAs: te pide que lo hagas tú en Chrome.
 - No ejecuta operaciones con dinero real.
 - No guarda archivos fuera de `ANZO archivos`.
+- No insiste sin fin: si un paso no le sale en 3 intentos, se detiene y te pide ayuda.
 
 ## La línea del modelo
 
@@ -70,6 +71,7 @@ Debajo del estado aparece `● Modelo: claude-sonnet-5 · Claude`. Punto verde: 
 | "Llegaste al límite de uso de tu membresía de Claude" | Hay que esperar a que se reinicie el límite de tu plan |
 | Chrome pide permiso para un sitio | Acéptalo en Chrome; es el permiso por sitio de la extensión |
 | Se queda "pensando" mucho rato | Mira el final de `C:\dev\anzo-claude\logs\anzo.log` |
+| "Llevo 60 acciones en esta tarea y todavía no termino..." | Paró solo para no gastar tokens. Si iba bien: "Anzo, sigue". Si estaba enredado, dile cómo hacerlo o hazlo tú. El tope se cambia con `ANZO_MAX_TOOL_CALLS` en `.env` |
 | "Micrófono bloqueado" | Permite el micrófono en la ventana y vuelve a abrir ANZO |
 | La extensión dejó de responder | Revisa si una página abrió una alerta y ciérrala a mano en Chrome |
 
