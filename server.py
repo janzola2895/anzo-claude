@@ -1,7 +1,7 @@
 """
-ANZO's local server: bridges the browser UI to brain.py.
+ANZO + Claude's local server: bridges the browser UI to brain.py.
 
-Stdlib only, on purpose — no pip installs to keep in sync between this
+Stdlib only, on purpose -- no pip installs to keep in sync between this
 machine and any other one this runs on. Binds to 127.0.0.1 only.
 
 Endpoints:
@@ -9,6 +9,8 @@ Endpoints:
   GET  /app.js, /style.css        -> static files
   GET  /api/stream?token&message&session_id   -> Server-Sent Events,
         one line per brain.run() event, closes on "complete"/"error"/"interrupted"
+  GET  /api/ready?token           -> startup progress for the window
+  GET  /api/model?token           -> which Claude model answered the last turn
   POST /api/interrupt  (header X-Anzo-Token)  -> brain.cancel_active()
 
 A random per-launch token gates every request (EventSource can't send
@@ -16,18 +18,20 @@ custom headers, so the stream endpoint takes it as a query param instead;
 POST /api/interrupt uses a header since fetch() supports one). Combined
 with the 127.0.0.1 bind, this keeps it usable only from this machine's
 own browser tab.
+
+Unlike the original ANZO (C:\\dev\\anzo), this version starts no browser
+automation of its own: Claude drives the user's everyday Chrome through the
+Claude in Chrome extension, and there is no router. The server only makes sure
+that Chrome is running, because the extension lives in it.
 """
 from __future__ import annotations
 
-import contextlib
 import datetime
 import json
 import mimetypes
 import os
 import secrets
 import shutil
-import socket
-import sqlite3
 import subprocess
 import sys
 import threading
@@ -63,30 +67,34 @@ _load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 import brain
 
-PORT = int(os.environ.get("ANZO_PORT", "8730"))
+# Not 8730: that's the original ANZO's port. Both can be installed side by
+# side, and a busy port makes main() open a window onto whatever is running
+# there -- it must never be the other version.
+PORT = int(os.environ.get("ANZO_PORT", "8740"))
 HOST = "127.0.0.1"
 TOKEN = secrets.token_urlsafe(24)
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui")
 ALLOWED_ORIGIN = f"http://{HOST}:{PORT}"
 
-BROWSER_MCP_PORT = int(os.environ.get("ANZO_BROWSER_MCP_PORT", "8931"))
-CHROME_DEBUG_PORT = int(os.environ.get("ANZO_CHROME_DEBUG_PORT", "9223"))
-PROFILE_DIR = os.environ.get("ANZO_BROWSER_PROFILE", "").strip() or os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), ".browser-profile")
 # Separate Chrome profile for ANZO's own app window (mic permission, etc.), so
-# it never mixes with the automation Chrome above or the user's daily browser.
+# the voice UI never lives inside the user's everyday Chrome, where Claude works.
 UI_PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".ui-profile")
 # app (default): Chrome --app window, no tabs/address bar. browser: default
-# browser tab (old behavior). none: don't open anything.
+# browser tab. none: don't open anything.
 UI_MODE = os.environ.get("ANZO_UI", "app").strip().lower()
 
+# The user's everyday Chrome, where the Claude in Chrome extension is installed
+# (profile "Default" on this machine).
+CHROME_USER_DATA = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "User Data")
+CHROME_PROFILE = os.environ.get("ANZO_CHROME_PROFILE", "Default").strip() or "Default"
+
 # Shared with the UI through /api/ready so the window can open immediately and
-# show startup progress instead of the user staring at nothing for ~30s.
+# show startup progress.
 _boot_state = {"ready": False, "step": "Iniciando…"}
 
 # Bitacora: a running log of what's been said, summarized -- not transcribed
 # raw -- so it stays short and doesn't multiply claude -p calls against the
-# weekly usage limit. See record_exchange()/_summary_loop() below.
+# membership's limits. See record_exchange()/_summary_loop() below.
 BITACORA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Anzo", "Bitacora")
 IDLE_SUMMARY_GAP_S = int(os.environ.get("ANZO_IDLE_SUMMARY_GAP", "600"))
 SUMMARY_CHECK_INTERVAL_S = 120
@@ -107,133 +115,51 @@ def _find_chrome():
     return None
 
 
-def start_chrome():
-    """Launch Chrome ourselves, as our own long-lived process, instead of
-    letting Playwright MCP launch (and therefore own) it.
-
-    Playwright MCP's maintainer confirmed the browser's lifetime is tied to
-    the MCP client CONNECTION's lifetime by design ("we rely on the
-    connection-is-a-lifetime model" -- microsoft/playwright-mcp#1302): the
-    browser closes whenever the connected client goes away, with no opt-out.
-    Since every claude -p turn is its own short-lived client that connects
-    and then disconnects when the turn ends, that meant the browser closed
-    at the end of every single turn -- confirmed live, repeatedly.
-
-    Fix: launch Chrome ourselves with a devtools port open, and have
-    Playwright MCP attach to it over CDP (start_browser_mcp) instead of
-    spawning its own. It doesn't own this process, so a client disconnecting
-    just ends Playwright MCP's control of it, not the browser itself."""
-    chrome = _find_chrome()
-    if not chrome:
-        print("WARNING: Chrome not found in the usual install locations — "
-              "browser control will not be available. Continuing with voice-only.")
-        return None
-    cmd = [chrome,
-           f"--remote-debugging-port={CHROME_DEBUG_PORT}",
-           f"--user-data-dir={PROFILE_DIR}",
-           "--no-first-run", "--no-default-browser-check"]
-    proc = subprocess.Popen(cmd)
-    print(f"Starting Chrome with a devtools port on {CHROME_DEBUG_PORT} "
-          f"(profile: {PROFILE_DIR})")
-    return proc
-
-
-def _clean_console_logs():
-    """Playwright MCP also drops a console-<timestamp>.log into its output dir
-    for every client session (one per ANZO turn). Those would pile up in the
-    user's desktop folder, so remove them at startup and shutdown. Only files
-    matching that exact pattern are touched."""
-    import glob
-    for f in glob.glob(os.path.join(brain.OUTPUT_DIR, "console-*.log")):
-        try:
-            os.remove(f)
-        except OSError:
-            pass
-
-
-def start_browser_mcp():
-    """Launch the Playwright MCP server as its own long-lived process, attached
-    to the Chrome instance from start_chrome() via CDP rather than launching
-    (and owning) its own browser."""
-    npx = shutil.which("npx")
-    if not npx:
-        print("WARNING: npx not found — browser control will not be available "
-              "(install Node.js). Continuing with voice-only.")
-        return None
-    os.makedirs(brain.OUTPUT_DIR, exist_ok=True)
-    _clean_console_logs()
-    cmd = [npx, "@playwright/mcp@latest",
-           "--port", str(BROWSER_MCP_PORT),
-           # Its only extra allowed root, so screenshots can land in the
-           # user's "ANZO archivos" desktop folder (see brain.OUTPUT_DIR).
-           "--output-dir", brain.OUTPUT_DIR,
-           "--cdp-endpoint", f"http://localhost:{CHROME_DEBUG_PORT}"]
-    # No stdout=PIPE here: nothing was reading that pipe, so its output
-    # buffer would eventually fill and silently block the process (and any
-    # startup error would be invisible instead of just failing loudly).
-    # Inheriting the parent's console is simpler and correct for a
-    # single-user local tool.
-    kwargs = {}
-    if sys.platform == "win32":
-        kwargs["shell"] = True  # same npx.cmd-shim reason as brain.py
-    proc = subprocess.Popen(cmd, **kwargs)
-    print(f"Starting browser MCP server on port {BROWSER_MCP_PORT}, "
-          f"attaching to Chrome via CDP — first launch downloads the package, give it a moment.")
-    return proc
-
-
-# `ccr start` daemonizes: the service and its gateway child outlive the command.
-# On Windows the gateway child is killed with exit 0xC000013A (a console
-# control event) if the console `ccr start` ran in disappears -- which is what
-# happens when ANZO is launched without a terminal (pythonw / desktop
-# shortcut): the console dies as soon as the command returns and takes the
-# gateway with it, leaving a router that accepts requests and answers 502
-# "Core gateway auth token is not initialized". CREATE_NO_WINDOW gives the
-# command a hidden console that lives as long as the daemon, so it survives.
-_CCR_KWARGS = {"creationflags": 0x08000000, "shell": True} if sys.platform == "win32" else {}
-
-
-def _ccr(*args, timeout=60):
-    ccr = shutil.which("ccr")
-    if not ccr:
-        return None
-    return subprocess.run([ccr, *args], timeout=timeout, capture_output=True, **_CCR_KWARGS)
-
-
-def start_router():
-    """(Re)start claude-code-router's background service (gateway on :3456)
-    when ANZO_ROUTER is fallback/always. Always `stop` first: reusing whatever
-    daemon was left over from an earlier run is how the gateway ended up half
-    dead. Providers, keys and routing rules are configured once in CCR's own UI
-    (`ccr ui`), never stored in this repo."""
-    if brain.ROUTER_MODE == "off":
-        return False
-    if not shutil.which("ccr"):
-        print("WARNING: ANZO_ROUTER esta activo pero no encuentro `ccr` en PATH. "
-              "Instalalo con 'npm install -g @musistudio/claude-code-router' "
-              "(Node 22+). Sin router, Anzo sigue solo con la suscripcion.")
-        return False
+def user_chrome_running() -> bool:
+    """Is the user's everyday Chrome open? While it runs, Chrome keeps the
+    `lockfile` in its user-data folder open exclusively, so trying to open it
+    fails; once Chrome exits the file is gone or openable. Instant, and it
+    ignores ANZO's own app window (that one uses its own --user-data-dir)."""
+    lock = os.path.join(CHROME_USER_DATA, "lockfile")
     try:
-        _ccr("stop", timeout=30)
-        _ccr("start", "--no-open", timeout=60)
-    except (subprocess.TimeoutExpired, OSError) as e:
-        print(f"WARNING: `ccr start` fallo: {e}")
+        fd = os.open(lock, os.O_RDWR)
+    except FileNotFoundError:
         return False
-    print(f"claude-code-router iniciado (modo {brain.ROUTER_MODE}), "
-          f"gateway en {brain.ROUTER_URL}")
-    return True
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    os.close(fd)
+    return False
 
 
-def stop_router():
-    """Counterpart of start_router(): stop the service when ANZO closes, so
-    the next launch starts from a clean state instead of adopting a stale one."""
-    if brain.ROUTER_MODE == "off" or not _boot_state.get("router_started"):
-        return
-    try:
-        _ccr("stop", timeout=30)
-        print("claude-code-router detenido.")
-    except (subprocess.TimeoutExpired, OSError) as e:
-        print(f"WARNING: `ccr stop` fallo: {e}")
+_chrome_lock = threading.Lock()
+
+
+def ensure_user_chrome():
+    """Open the user's everyday Chrome if it's closed: the Claude in Chrome
+    extension only exists while it runs. Never closes or restarts it -- it's
+    the user's own browser. Returns an error message, or None when it's up."""
+    if os.environ.get("ANZO_NO_AUTOMATION") == "1":  # UI-only testing
+        return None
+    with _chrome_lock:
+        if user_chrome_running():
+            return None
+        chrome = _find_chrome()
+        if not chrome:
+            return "No encontre Chrome instalado."
+        print(f"Chrome no esta abierto; abriendolo (perfil {CHROME_PROFILE}).")
+        subprocess.Popen([chrome, f"--profile-directory={CHROME_PROFILE}"],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and not user_chrome_running():
+            time.sleep(0.3)
+        if not user_chrome_running():
+            return "Chrome no termino de abrir."
+        # Give the extension's service worker a moment to come up.
+        time.sleep(3)
+        return None
 
 
 _exchange_lock = threading.Lock()
@@ -286,56 +212,17 @@ def _summary_loop():
         _maybe_flush_summary()
 
 
-CCR_LOG_DB = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")),
-                          "claude-code-router", "request-logs.sqlite")
-# A log row older than this no longer says what's answering *now*.
-MODEL_FRESH_S = 30 * 60
-_PROVIDER_NAMES = {"google-gemini": "Google Gemini", "codex-api": "Codex",
-                   "ovh-sin-registro": "OVH"}
-_model_cache = {"at": 0.0, "value": None}
-# Which backend the latest turn went to (brain yields {t: "backend"}) and what
-# the CLI reported. The router's log can't see subscription turns, so for those
-# this is the only source.
-_last_turn = {"kind": None, "model": "", "ok": None}
+# Model the CLI reported for the latest turn, shown in the window. Always the
+# user's own Claude membership in this version.
+_last_turn = {"model": "", "ok": None}
 
 
 def current_backend():
-    """What model is actually answering, per claude-code-router's own request
-    log (read-only). The claude CLI only knows the alias it asked for (e.g.
-    "Codex API/gpt-5.6-terra"); the router rewrites it and may fall back to
-    another provider, so the log's resolved model is the real answer. Returns
-    None when the router has no recent traffic (UI then falls back to the model
-    the CLI itself reported)."""
-    if _last_turn["kind"] == "subscription":
-        return {"model": _last_turn["model"] or "Claude",
-                "provider": "Claude (membresía)",
-                "ok": _last_turn["ok"] is not False,
-                "status": 200 if _last_turn["ok"] is not False else 0}
-    now = time.monotonic()
-    if now - _model_cache["at"] < 1.5:
-        return _model_cache["value"]
-    value = None
-    try:
-        if os.path.isfile(CCR_LOG_DB):
-            uri = "file:" + CCR_LOG_DB.replace("\\", "/") + "?mode=ro"
-            with contextlib.closing(sqlite3.connect(uri, uri=True, timeout=1)) as c:
-                row = c.execute(
-                    "select provider, coalesce(nullif(response_model,''), resolved_model), "
-                    "status_code, created_at from request_logs order by id desc limit 1"
-                ).fetchone()
-            if row:
-                provider, model, status, created = row
-                age = (datetime.datetime.now(datetime.timezone.utc)
-                       - datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))).total_seconds()
-                if model and age < MODEL_FRESH_S:
-                    key = (provider or "").split("::")[0]
-                    value = {"model": model,
-                             "provider": _PROVIDER_NAMES.get(key, key if key != "unknown" else ""),
-                             "ok": status == 200, "status": status}
-    except (sqlite3.Error, OSError, ValueError):
-        value = None
-    _model_cache.update(at=now, value=value)
-    return value
+    if not _last_turn["model"]:
+        return None
+    ok = _last_turn["ok"] is not False
+    return {"model": _last_turn["model"], "provider": "Claude",
+            "ok": ok, "status": 200 if ok else 0}
 
 
 class Server(ThreadingHTTPServer):
@@ -362,6 +249,10 @@ class Handler(BaseHTTPRequestHandler):
         # No Origin header at all means a same-machine, non-browser caller
         # (curl, our own tooling) rather than a forged browser request.
         return origin is None or origin == ALLOWED_ORIGIN
+
+    def _token_ok(self, parsed) -> bool:
+        qs = parse_qs(parsed.query)
+        return self._origin_ok() and qs.get("token", [""])[0] == TOKEN
 
     def _send_json(self, status: int, payload: dict):
         body = json.dumps(payload).encode("utf-8")
@@ -405,16 +296,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/model":
-            qs = parse_qs(parsed.query)
-            if not self._origin_ok() or qs.get("token", [""])[0] != TOKEN:
+            if not self._token_ok(parsed):
                 self._send_json(403, {"error": "forbidden"})
                 return
             self._send_json(200, {"backend": current_backend()})
             return
 
         if parsed.path == "/api/ready":
-            qs = parse_qs(parsed.query)
-            if not self._origin_ok() or qs.get("token", [""])[0] != TOKEN:
+            if not self._token_ok(parsed):
                 self._send_json(403, {"error": "forbidden"})
                 return
             self._send_json(200, dict(_boot_state))
@@ -436,7 +325,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_stream(self, parsed):
         qs = parse_qs(parsed.query)
-        if not self._origin_ok() or qs.get("token", [""])[0] != TOKEN:
+        if not self._token_ok(parsed):
             self._send_json(403, {"error": "forbidden"})
             return
         message = qs.get("message", [""])[0]
@@ -453,29 +342,26 @@ class Handler(BaseHTTPRequestHandler):
 
         reply_parts = []
         try:
-            if _boot_state.get("ready") and not browser_up():
-                self._sse({"t": "warning", "message": "Reabriendo el navegador de trabajo…"})
-                problem = ensure_browser()
+            # The user may have closed Chrome since the last turn; the
+            # extension goes with it, so reopen it before Claude needs it.
+            if _boot_state.get("ready") and not user_chrome_running():
+                self._sse({"t": "warning", "message": "Abriendo Chrome…"})
+                problem = ensure_user_chrome()
                 if problem:
                     self._sse({"t": "warning", "message": problem})
             for ev in brain.run(message, session_id):
-                line = f"data: {json.dumps(ev)}\n\n".encode("utf-8")
-                self.wfile.write(line)
-                self.wfile.flush()
+                self._sse(ev)
                 t = ev.get("t")
-                if t == "backend":
-                    _last_turn.update(kind=ev.get("kind"), model="", ok=None)
-                elif t == "status" and ev.get("model"):
-                    _last_turn["model"] = ev["model"]
+                if t == "status" and ev.get("model"):
+                    _last_turn.update(model=ev["model"], ok=None)
+                elif t == "delta":
+                    reply_parts.append(ev.get("text") or "")
                 elif t == "complete":
                     _last_turn["ok"] = True
+                    record_exchange(message, "".join(reply_parts))
                 elif t == "error":
                     _last_turn["ok"] = False
-                if ev.get("t") == "delta":
-                    reply_parts.append(ev.get("text") or "")
-                elif ev.get("t") == "complete":
-                    record_exchange(message, "".join(reply_parts))
-                if ev.get("t") in ("complete", "error", "interrupted"):
+                if t in ("complete", "error", "interrupted"):
                     break
         except (BrokenPipeError, ConnectionAbortedError):
             # Browser navigated away / closed the tab mid-stream. Not our problem;
@@ -494,62 +380,13 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200, {"cancelled": cancelled})
 
 
-def _stop(proc, name):
-    if proc and proc.poll() is None:
-        if sys.platform == "win32":
-            # `npx` runs through a cmd.exe shim (shell=True), so terminate()
-            # only killed the shim and left node.exe (Playwright MCP) alive on
-            # its port. taskkill /T takes the whole tree down.
-            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                           capture_output=True)
-            return
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-
-
-def _wait_for_port(port, timeout_s, label):
-    """Poll until something accepts a TCP connection on this port, or give
-    up after timeout_s. Replaces a fixed time.sleep(2) that assumed
-    Chrome's devtools port (and, worse, Playwright MCP -- launched via
-    `npx @playwright/mcp@latest`, which can take much longer than 2s if it
-    needs to check for or download the package) would always be ready by
-    then. Confirmed live: it wasn't always, and the browser tool reported
-    "not connected" on the very first command after startup.
-
-    Tries both 127.0.0.1 and localhost, not just HOST (127.0.0.1): also
-    confirmed live, Playwright MCP's own startup banner ("Listening on
-    http://localhost:8931") had already printed while a 127.0.0.1-only
-    check here kept failing to connect, so this sat out the full
-    timeout every time before falling through and continuing anyway --
-    it worked, but only after needlessly waiting the whole budget. On
-    this machine plain 127.0.0.1 and localhost apparently don't resolve
-    to the same thing for a fresh Node listener; trying both is cheap
-    and avoids needing to know which one will actually work."""
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        for h in ("127.0.0.1", "localhost"):
-            try:
-                with socket.create_connection((h, port), timeout=1):
-                    return True
-            except OSError:
-                continue
-        time.sleep(0.3)
-    print(f"WARNING: {label} (port {port}) didn't respond within {timeout_s}s -- "
-          f"continuing anyway, but the browser tool may not work yet.")
-    return False
-
-
 def open_ui():
     """Open ANZO's window. Returns the process to wait on (app mode) or None.
 
     App mode = Chrome's --app window: no tabs, no address bar, its own profile.
     It has to be Chrome (not Edge/WebView): the voice UI relies on Chrome's
-    Web Speech API. Kept separate from the automation Chrome on purpose --
-    loading this page in that window once got it navigated away by Claude
-    (see Anzo/Problemas resueltos.md)."""
+    Web Speech API. Kept out of the user's everyday Chrome on purpose, so
+    Claude working there can never navigate the voice UI away."""
     url = f"http://{HOST}:{PORT}"
     if UI_MODE == "none":
         return None
@@ -563,86 +400,14 @@ def open_ui():
     return None
 
 
-# Processes this server launched (automation Chrome, Playwright MCP). Global so
-# ensure_browser() can replace them mid-session and shutdown stops the current ones.
-_procs = {}
-_browser_lock = threading.Lock()
-
-
-def _port_open(port) -> bool:
-    for h in ("127.0.0.1", "localhost"):
-        try:
-            with socket.create_connection((h, port), timeout=0.5):
-                return True
-        except OSError:
-            continue
-    return False
-
-
-def browser_up() -> bool:
-    return _port_open(CHROME_DEBUG_PORT) and _port_open(BROWSER_MCP_PORT)
-
-
-def ensure_browser():
-    """Reopen the automation Chrome and/or Playwright MCP if they're gone --
-    e.g. the user closed the Chrome window by mistake. Called before every
-    turn, so the next instruction just works instead of Claude answering "the
-    browser service isn't running, restart it yourself". A dead Chrome also
-    means Playwright MCP's CDP connection is dead, so MCP is restarted with it.
-    Returns an error message, or None when the browser is (now) up."""
-    if os.environ.get("ANZO_NO_AUTOMATION") == "1":
-        return None
-    with _browser_lock:
-        chrome_ok = _port_open(CHROME_DEBUG_PORT)
-        mcp_ok = _port_open(BROWSER_MCP_PORT)
-        if chrome_ok and mcp_ok:
-            return None
-        if not chrome_ok:
-            print("El Chrome de trabajo no responde; reabriendolo.")
-            _stop(_procs.get("chrome"), "Chrome")
-            _procs["chrome"] = start_chrome()
-            if not _procs["chrome"]:
-                return "No encontre Chrome instalado."
-            _wait_for_port(CHROME_DEBUG_PORT, 20, "Chrome devtools")
-            _stop(_procs.get("mcp"), "browser MCP")
-            mcp_ok = False
-        if not mcp_ok:
-            print("Playwright MCP no responde; reiniciandolo.")
-            _procs["mcp"] = start_browser_mcp()
-            if not _procs["mcp"]:
-                return "No pude iniciar las herramientas del navegador (falta npx/Node.js)."
-            if not _wait_for_port(BROWSER_MCP_PORT, 60, "Playwright MCP"):
-                return "Las herramientas del navegador no respondieron a tiempo."
-        return None
-
-
-def _boot(procs):
-    """Everything slow (automation Chrome, Playwright MCP, router). Runs in a
-    background thread so the window is already open while this works."""
+def _boot():
+    """Startup work that can take a few seconds, in a background thread so the
+    window is already open meanwhile."""
     try:
-        if os.environ.get("ANZO_NO_AUTOMATION") == "1":  # UI-only testing
-            return
-        _boot_state["step"] = "Abriendo el navegador de trabajo…"
-        procs["chrome"] = start_chrome()
-        if procs["chrome"]:
-            print("Esperando a que el puerto de depuracion de Chrome responda...")
-            _wait_for_port(CHROME_DEBUG_PORT, 20, "Chrome devtools")
-        _boot_state["step"] = "Conectando las herramientas del navegador…"
-        procs["mcp"] = start_browser_mcp() if procs["chrome"] else None
-        if procs["mcp"]:
-            print("Esperando a que el servidor de Playwright MCP responda "
-                  "(la primera vez puede tardar mientras npx descarga el paquete)...")
-            _wait_for_port(BROWSER_MCP_PORT, 60, "Playwright MCP")
-        _boot_state["step"] = "Conectando el router…"
-        if start_router():
-            _boot_state["router_started"] = True
-            if not _wait_for_port(brain.ROUTER_PORT, 15, "claude-code-router gateway"):
-                print("AVISO: el gateway del router no esta arriba. CCR no lo levanta hasta "
-                      "que haya al menos un proveedor con modelo configurado: corre `ccr ui`, "
-                      "agrega uno y pulsa Start en la pagina Server.")
-            if not brain.ROUTER_KEY:
-                print("AVISO: ANZO_ROUTER_KEY vacio. Si el router exige clave de cliente "
-                      "(pagina API Keys de `ccr ui`), ponla en .env o exportala.")
+        _boot_state["step"] = "Revisando Chrome…"
+        problem = ensure_user_chrome()
+        if problem:
+            print(f"AVISO: {problem}")
     except Exception as e:  # never leave the UI stuck on "Iniciando"
         print(f"ERROR durante el arranque: {e!r}")
     finally:
@@ -653,24 +418,24 @@ def main():
     try:
         server = Server((HOST, PORT), Handler)
     except OSError:
-        # Port taken: ANZO is already running (autostart task, earlier
-        # launch). Its page injects the token on each GET /, so just open a
-        # window onto it instead of starting a second copy.
-        print(f"ANZO ya esta corriendo en el puerto {PORT}; abriendo su ventana.")
+        # Port taken: ANZO + Claude is already running. Its page injects the
+        # token on each GET /, so just open a window onto it instead of
+        # starting a second copy.
+        print(f"ANZO + Claude ya esta corriendo en el puerto {PORT}; abriendo su ventana.")
         open_ui()
         return
 
-    print(f"ANZO listening on http://{HOST}:{PORT}")
+    print(f"ANZO + Claude listening on http://{HOST}:{PORT}")
     threading.Thread(target=server.serve_forever, daemon=True).start()
     threading.Thread(target=_summary_loop, daemon=True).start()
-    procs = _procs
-    threading.Thread(target=_boot, args=(procs,), daemon=True).start()
+    threading.Thread(target=_boot, daemon=True).start()
 
     ui_proc = open_ui()
     started = time.monotonic()
     try:
         if ui_proc:
-            # Closing the window quits ANZO and everything it started.
+            # Closing the window quits ANZO. The user's Chrome stays open:
+            # it's their browser, not ours.
             ui_proc.wait()
             if time.monotonic() - started < 3:
                 # Chrome handed the window to an already-running instance of
@@ -684,10 +449,6 @@ def main():
     finally:
         server.shutdown()
         server.server_close()
-        _stop(procs.get("mcp"), "browser MCP")
-        _stop(procs.get("chrome"), "Chrome")
-        _clean_console_logs()
-        stop_router()
         _maybe_flush_summary(force=True)
 
 

@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "anzo-ui-only",
+      "name": "anzo-claude-ui-only",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8899", "--directory", "C:/dev/anzo/ui"],
+      "runtimeArgs": ["-m", "http.server", "8899", "--directory", "C:/dev/anzo-claude/ui"],
       "port": 8899
     }
   ]

@@ -1,4 +1,5 @@
-"""Generates ui/anzo.ico: a glowing blue orb on a dark rounded square.
+"""Generates ui/anzo.ico: a glowing orange orb on a dark rounded square
+(orange for ANZO + Claude, so it isn't confused with the original ANZO's blue one).
 
 Stdlib only (struct + zlib), like the rest of the project -- no Pillow.
 Run once; the .ico is committed. `python scripts/make_icon.py`"""
@@ -10,7 +11,7 @@ import zlib
 
 SIZES = (16, 32, 48, 64, 128, 256)
 BG = (7, 9, 15)
-ACCENT = (91, 124, 255)
+ACCENT = (217, 119, 87)
 
 
 def render(n):

@@ -1,5 +1,5 @@
-# Crea el acceso directo "ANZO" en el Escritorio: doble clic y todo arranca
-# (ventana de la app, Chrome de trabajo, Playwright MCP y el router).
+# Crea el acceso directo "ANZO + Claude" en el Escritorio: doble clic y abre la
+# ventana de la app (y tu Chrome si estaba cerrado, para la extension).
 # Usa pythonw.exe para que no aparezca una consola. Correr una vez.
 
 $ErrorActionPreference = "Stop"
@@ -13,14 +13,14 @@ if (-not (Test-Path $pythonw)) { Write-Error "No se encontro pythonw.exe junto a
 $icon = Join-Path $projectDir "ui\anzo.ico"
 if (-not (Test-Path $icon)) { & $python (Join-Path $projectDir "scripts\make_icon.py") }
 
-$lnkPath = Join-Path ([Environment]::GetFolderPath("Desktop")) "ANZO.lnk"
+$lnkPath = Join-Path ([Environment]::GetFolderPath("Desktop")) "ANZO + Claude.lnk"
 $shell = New-Object -ComObject WScript.Shell
 $lnk = $shell.CreateShortcut($lnkPath)
 $lnk.TargetPath = $pythonw
 $lnk.Arguments = "`"$(Join-Path $projectDir 'Anzo.pyw')`""
 $lnk.WorkingDirectory = $projectDir
 $lnk.IconLocation = $icon
-$lnk.Description = "ANZO - asistente de voz"
+$lnk.Description = "ANZO + Claude - asistente de voz con tu cuenta de Claude"
 $lnk.Save()
 
 Write-Host "Acceso directo creado: $lnkPath"

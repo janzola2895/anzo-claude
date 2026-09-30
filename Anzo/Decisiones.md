@@ -144,6 +144,31 @@ Implementados los 4 pedidos priorizados de la lista de pendientes anterior. El p
 
 **Probado de punta a punta** (instancia de prueba, Gemini y OVH sin cupo): primer turno → router → `api_retry rate_limit` → membresía respondió; segundo turno → se saltó el router por el enfriamiento y respondió la membresía en ~3 s. No medido: cuánto tarda exactamente el primer intento por el router antes del `api_retry` (CCR respeta el `Retry-After` de Google, del orden de 40 s).
 
+## Nace ANZO + Claude: sin router, con la extensión Claude in Chrome (2026-09-29)
+
+**Pedido del usuario:** quitar el autoarranque con Windows, hacer una copia del proyecto separada de GitHub para no afectar la versión original, y que esta copia ("ANZO + Claude") use solo su cuenta de Claude y la extensión de Chrome, sin el router.
+
+**Qué se hizo:**
+- La tarea programada `ANZO` (autoarranque) se eliminó; esta versión no incluye los scripts de autoarranque.
+- Copia en `C:\dev\anzo-claude` con el historial de git, **sin remoto** (se quitó `origin`). La original sigue en `C:\dev\anzo`, conectada a `janzola2895/anzo`.
+- **Sin router:** se quitó todo lo de claude-code-router (modos, reintentos, lectura de su log, arranque y parada de `ccr`). Cada turno es la membresía con `--settings anzo-claude-settings.json` (sigue haciendo falta: la config global de Claude Code sigue apuntando a CCR).
+- **Navegador = la extensión:** `claude -p --chrome`, `--allowedTools mcp__claude-in-chrome,Skill` + escritura solo en `ANZO archivos`. Se quitaron el Chrome aparte (`.browser-profile`), Playwright MCP, `mcp-config.json` y el reabridor del navegador. En su lugar, el servidor solo se asegura de que el Chrome normal del usuario esté abierto (lo detecta por el `lockfile` de su perfil) y lo abre si está cerrado; nunca lo cierra.
+- El prompt le pide a Claude trabajar en su grupo de pestañas y **no cerrarlas** salvo pedido explícito (la skill `chrome-browser` que se carga sola dice lo contrario).
+- Capturas: la extensión guarda con `save_to_disk` en una carpeta temporal y responde `Screenshot saved to: <ruta>`; `brain._collect_screenshot()` la copia a `ANZO archivos` como `captura_<fecha>.jpg`. Claude no necesita permiso para copiar archivos.
+- Si al arrancar un turno la extensión no aparece conectada, la ventana muestra un aviso.
+- Puerto 8740 (la original usa 8730), título y acceso directo "ANZO + Claude", ícono naranja para no confundirla con la azul.
+
+**Probado de punta a punta** (sin ventana, con el Chrome real): abrir example.com (14 s), guardar captura en el escritorio (14 s, llegó a `ANZO archivos`), cerrar la pestaña al pedirlo (10 s); modelo `claude-sonnet-5`; **cero** peticiones al router durante la prueba. No probado aquí: voz real en la ventana nueva y tareas de Power Platform.
+
+## Investigación: Claude in Chrome (la extensión) como navegador de ANZO (2026-09-29)
+
+Pregunta del usuario: ¿puede ANZO usar la extensión Claude in Chrome en vez del Chrome aparte + Playwright MCP? Probado en esta máquina (CLI 2.1.283, extensión 1.0.94 en el perfil Default de Chrome). Sin cambios de código todavía.
+
+- **Modo sin ventana (`claude -p --chrome`) funciona** con la membresía (`--settings anzo-claude-settings.json`, login de claude.ai): `claude-in-chrome` conectado con 22 herramientas, abrió una pestaña en el Chrome normal del usuario (con sus sesiones), leyó la página y respondió (~20-30 s en una tarea simple; parte es la carga automática de la skill `chrome-browser`). La primera ejecución registró el conector nativo de la CLI (`HKCU\Software\Google\Chrome\NativeMessagingHosts\com.anthropic.claude_code_browser_extension`). Convive con la sesión de la app de escritorio de Claude sin conflicto.
+- **Continuidad entre turnos:** las pestañas van a un grupo ligado a la sesión; con `--resume` el siguiente turno ve el mismo grupo y la misma pestaña. Al salir, la CLI no cierra un grupo con páginas abiertas.
+- **Por el router no funciona:** con la clave del router (`apiKeyHelper`) la CLI apaga la integración (0 herramientas), como dice la documentación. Con el login de claude.ai apuntando al router, la integración sí carga, pero hay que pedir un modelo de Claude (`--model sonnet`; el alias de CCR da `unrecognized_model`) y CCR rechaza ese login con 401 porque exige su propia clave de cliente. Solo funcionaría quitando esa exigencia en CCR (cualquier programa local podría usar el router); no probado de punta a punta (sin cupo).
+- **A ajustar si se adopta:** la skill `chrome-browser` le dice a Claude que cierre las pestañas que abre; ANZO tendría que pedir lo contrario en su prompt. La extensión actúa en el Chrome personal del usuario, con todas sus cuentas.
+
 ## Cambio de diseño: interrumpir exige la palabra clave (2026-09-29)
 
 Reportado en vivo: con una tarea corriendo, una conversación de fondo en la sala ("champiñones Camilo se quiere ir o hay sándwich con queso...") interrumpió la tarea y se mandó a Claude como instrucción nueva. Causa: por diseño, mientras ANZO estaba `WORKING` cualquier frase lo interrumpía (requisito original de "interrupción en caliente").

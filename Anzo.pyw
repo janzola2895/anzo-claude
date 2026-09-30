@@ -1,12 +1,12 @@
-"""Double-click launcher for ANZO (no console window).
+"""Double-click launcher for ANZO + Claude (no console window).
 
 Runs under pythonw.exe, which has no console, so stdout/stderr go to
 logs/anzo.log instead -- and are pointed there at the OS level, so the child
 processes server.py starts (Chrome, Playwright MCP, ccr) inherit the log rather
 than a dead handle that would block them once its pipe buffer fills.
 
-Opens ANZO's app window right away; closing that window quits ANZO and
-everything it started. If ANZO is already running it just opens another window
+Opens ANZO's app window right away; closing that window quits ANZO (the
+user's own Chrome stays open). If it is already running it just opens another window
 onto it (see server.main)."""
 import ctypes
 import msvcrt
@@ -36,11 +36,11 @@ if sys.stdout is None or sys.stderr is None:  # pythonw: no console attached
     k32.SetStdHandle(wintypes.DWORD(-12 & 0xFFFFFFFF), msvcrt.get_osfhandle(log.fileno()))
     sys.stdin, sys.stdout, sys.stderr = nul, log, log
 
-print("\n=== ANZO start ===", flush=True)
+print("\n=== ANZO + Claude start ===", flush=True)
 try:
     import server
     server.main()
 except Exception:
     traceback.print_exc()
     ctypes.windll.user32.MessageBoxW(
-        0, f"ANZO no pudo iniciar.\nMira el detalle en:\n{log_path}", "ANZO", 0x10)
+        0, f"ANZO + Claude no pudo iniciar.\nMira el detalle en:\n{log_path}", "ANZO + Claude", 0x10)

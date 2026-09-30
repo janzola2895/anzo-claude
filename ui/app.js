@@ -227,6 +227,10 @@ function startTurn(message) {
       case "warning":
         logLine("sys", "⚠ " + ev.message);
         break;
+      case "saved":
+        // brain.py copied a screenshot the extension saved into the desktop folder.
+        logLine("sys", "Captura guardada: " + ev.path.split(/[\\/]/).pop());
+        break;
       case "complete":
         sessionId = ev.session_id || sessionId;
         flushSentence(true);
