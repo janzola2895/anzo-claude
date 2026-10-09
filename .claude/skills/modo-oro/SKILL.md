@@ -43,7 +43,8 @@ Usa la pestaña de TradingView de tu grupo si ya existe; si no, abre una. Orden:
    toma una captura. Ahí lees: la hora local actual (arriba a la derecha, p. ej.
    "10:26 (UTC-5)" es hora de Colombia), el día, los eventos de EE. UU. (bandera) de las
    próximas horas, su impacto (las barras del icono: más barras llenas, más impacto) y
-   los "Coming in".
+   los "Coming in". La página abre en el día de hoy; si no ves la franja de la hora
+   actual, haz como mucho un scroll y no cambies filtros.
 2. **Gráfico del oro, por URL**, una captura por intervalo (probado: la URL cambia
    símbolo e intervalo, y el título de la pestaña muestra el precio, p. ej.
    "XAUUSD 4190.7 ▲ +1.38%"):
@@ -55,6 +56,15 @@ Usa la pestaña de TradingView de tu grupo si ya existe; si no, abre una. Orden:
    Si la URL no cambia el intervalo, como último recurso haz clic en el gráfico, escribe
    el número del intervalo (240, 60, 15 o 5) y pulsa Enter. Usa `zoom` solo si necesitas
    leer bien precios o paneles.
+
+   **Si el gráfico sale en blanco** (sin velas ni escala de precios, aunque el encabezado
+   y el precio sí cargan): no recargues, no pulses F5 ni abras pestañas nuevas, porque no
+   sirve. Haz una sola comprobación con `javascript_tool`: `document.visibilityState`. Si
+   dice `hidden`, Chrome considera que otra ventana tapa la del grupo AnzoBot y no pinta el
+   gráfico (pasó en la primera prueba real). Dile al usuario en una frase que deje visible
+   esa ventana, sin otra encima, y repita "modo oro". Dale lo que sí tienes (el precio sale
+   del título de la pestaña, y el calendario) pero **sin veredicto**: sin velas no hay A,
+   B ni C.
 3. **Dólar (DXY).** `https://www.tradingview.com/chart/?symbol=TVC%3ADXY&interval=60`,
    una captura: el oro suele moverse al revés del dólar. El US10Y (`TVC%3AUS10Y`) solo
    si te sobra presupuesto.

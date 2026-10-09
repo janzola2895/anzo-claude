@@ -80,6 +80,7 @@ Debajo del estado aparece `● Modelo: claude-sonnet-5 · Claude`. Punto verde: 
 | "Llegaste al límite de uso de tu membresía de Claude" | Hay que esperar a que se reinicie el límite de tu plan |
 | Chrome pide permiso para un sitio | Acéptalo en Chrome; es el permiso por sitio de la extensión |
 | Se queda "pensando" mucho rato | Mira el final de `C:\dev\anzo-claude\logs\anzo.log` |
+| Modo oro dice que el gráfico sale en blanco / no puede leer las velas | Chrome cree que la ventana del grupo AnzoBot está tapada por otra y no la pinta. Déjala visible (segundo monitor, o junto a la ventana de ANZO, no debajo) y repite "modo oro". Alternativa: en `chrome://flags` pon "Calculate window occlusion on Windows" en Disabled y reinicia Chrome |
 | "Llevo 60 acciones en esta tarea y todavía no termino..." | Paró solo para no gastar tokens. Si iba bien: "Anzo, sigue". Si estaba enredado, dile cómo hacerlo o hazlo tú. El tope se cambia con `ANZO_MAX_TOOL_CALLS` en `.env` |
 | "Micrófono bloqueado" | Permite el micrófono en la ventana y vuelve a abrir ANZO |
 | La extensión dejó de responder | Revisa si una página abrió una alerta y ciérrala a mano en Chrome |
