@@ -279,3 +279,24 @@ set ANZO_ROUTER_MODEL=<modelo tal como lo nombra CCR>   # opcional
 
 **Pendiente, no hecho:** el contexto crece turno a turno con cada captura (`--resume` mantiene todo), así que cada acción cuesta más a medida que avanza la conversación. Empezar una sesión nueva de vez en cuando lo reiniciaría, pero se perdería la continuidad entre pedidos.
 
+
+## "Viernes modo oro": análisis completo de XAUUSD con veredicto (2026-10-09)
+
+**Pedido del usuario:** al decir "Viernes modo oro", que ANZO haga el análisis completo del oro y diga si se debe abrir alguna operación o si se debe esperar a que el oro llegue a un precio y ahí evaluar de nuevo. La lista de qué debe tener un buen análisis intradía (contexto, sesión, sesgo multi-temporalidad, estructura, zona, gatillo, plan de trade) salió de la conversación del mismo día y quedó codificada en la skill.
+
+**Cómo llega la frase a Claude:** "viernes" ya era palabra clave (ver 2026-09-27), así que `stripWakeWord` la quita y a Claude le llega solo "modo oro" ("Anzo, modo oro" da lo mismo; en modo conversación llega "viernes modo oro" completo). Sin cambios en `ui/app.js`. Por eso la skill avisa que "Viernes" es el nombre del asistente, no el día.
+
+**Implementación:**
+- Skill nueva `.claude/skills/modo-oro/SKILL.md`, autosuficiente (no hace falta cargar `trading-chart-analysis`, para ahorrar una llamada). Una línea nueva en `SYSTEM_PROMPT` de `brain.py` le dice a Claude que la cargue al oír "modo oro": la lección ya anotada es que sin instrucción explícita no siempre usa lo que tiene.
+- **Todo en tradingview.com** (el usuario ya tiene sesión, no pide permisos de sitio nuevos): calendario económico (`/economic-calendar/`), XAUUSD en H4/H1/M15/M5 y DXY. Probado en un navegador aislado: la URL `/chart/?symbol=OANDA%3AXAUUSD&interval=240` cambia símbolo e intervalo (60, 240...), `TVC%3ADXY` carga el índice del dólar, el **título de la pestaña trae el precio** (útil para reevaluar sin captura) y el calendario muestra la hora local (UTC-5), banderas, barras de impacto y "Coming in". Una URL por intervalo + una captura cabe en un `browser_batch`.
+- **Filtros** (si falla uno no hay entrada ahora): noticia de EE. UU. de impacto alto en ±30 min, sesión líquida (y viernes después de las 11:00 a.m. hora Colombia), volatilidad/spread, y riesgo-beneficio ≥ 1:2. **8 confluencias**; setup válido = filtros OK + al menos 5, incluyendo zona y gatillo, con el precio ya en la zona.
+- **Tres veredictos:** A hay setup válido (entrada, stop, TP1/TP2, R:R, invalidación); B esperar y reevaluar (precio o rango exacto, qué debe verse ahí, precio que invalida, hora si el bloqueo es por noticia o sesión); C no hay setup. Ante la duda entre A y B, B.
+- **Reevaluación:** si ya hubo un modo oro "esperar" hoy (en la conversación o en `ANZO archivos\modo-oro.md`), el siguiente "modo oro" compara con el plan: si el precio no llegó, lo dice sin repetir el análisis; si llegó, repite calendario, M15 y M5 y da el nuevo veredicto; si tocó el precio de invalidación, descarta el plan.
+- **Salida:** hablada y corta (veredicto primero, por qué, niveles, cierre). El detalle, con la tabla de filtros y confluencias, va a `ANZO archivos\modo-oro.md` (se sobrescribe cada vez), porque una tabla no se puede leer en voz alta.
+- **Presupuesto:** apunta a ~15 llamadas y no pasar de 30 (el tope duro sigue en 60). No agrega indicadores al gráfico (un intento como máximo): si faltan EMA/RSI/MACD/ATR, lo dice y sugiere guardar un layout con ellos.
+
+**Cómo convive con el límite de diseño "nunca un opera / no operes":** el límite era no dar asesoría financiera personalizada ni órdenes directas. El modo oro entrega un **veredicto técnico del setup** (válido / esperar un precio / no hay), no una orden: nunca dice "compra ahora" sino "hay setup válido de compra" y por qué, no conoce la cuenta ni el apetito de riesgo del usuario, y cierra siempre con "lectura técnica educativa, la decisión es tuya". Además queda escrito que **solo analiza**: no toca el panel de trading ni el broker, ni botones de comprar/vender, ni crea alertas (las sugiere).
+
+**Limitación que se mantiene:** ANZO solo actúa cuando se le habla; no vigila el precio. "Esperar a que llegue a X" significa que el usuario vuelve a decir "modo oro" (o pone una alerta de TradingView en X para que le avise).
+
+**Probado:** compilación de `brain.py`, que el prompt no tiene caracteres que `cmd.exe` interprete, que la frase de voz llega como "modo oro" (con "Viernes", "Viernes,", "Anzo," y "hola viernes"), el frontmatter de la skill, y las URLs de TradingView arriba. **No probado:** un modo oro de punta a punta con el Chrome real del usuario (gasta membresía y maneja su navegador): cuántas acciones gasta de verdad, si respeta el formato hablado, y cómo se ven los indicadores en su layout real.

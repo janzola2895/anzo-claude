@@ -28,6 +28,15 @@ Si Chrome no deja activar el Modo de desarrollador, es una política del equipo 
 | "Anzo" solo | Queda escuchando tu siguiente frase |
 | También despierta con | "Jarvis" / "Yarvis" / "Viernes" |
 
+**Modo oro** (análisis completo de XAUUSD con veredicto):
+
+| Qué dices | Qué pasa |
+|---|---|
+| "Viernes modo oro" / "Anzo, modo oro" | Mira el calendario, el oro en H4/H1/M15/M5 y el dólar, y dice si hay setup válido, si hay que esperar a que el oro llegue a un precio, o si no hay setup. Deja el detalle en `ANZO archivos\modo-oro.md` |
+| "Viernes modo oro" otra vez, cuando el oro llegó al precio | Reevalúa: si falta, lo dice sin repetir todo; si llegó, revisa noticia, sesión y gatillo y da el nuevo veredicto |
+
+"Viernes" es el nombre del asistente, no el día. ANZO no vigila el precio por su cuenta: para que te avise, pon una alerta de TradingView en el precio que te diga. Funciona mejor si el gráfico ya tiene un layout guardado con EMA 20/50/200, VWAP, RSI, MACD y ATR (si faltan, lo dice y no gasta acciones agregándolos). Cada modo oro cuesta del orden de 15 acciones del navegador.
+
 **Mientras está trabajando** solo lo interrumpe la palabra clave:
 
 | Qué dices | Qué pasa |
@@ -55,7 +64,7 @@ Si Chrome no deja activar el Modo de desarrollador, es una política del equipo 
 
 - No ve las pestañas que abriste tú: si quieres que mire algo, pídele que lo abra.
 - No inicia sesión por ti ni resuelve CAPTCHAs: te pide que lo hagas tú en Chrome.
-- No ejecuta operaciones con dinero real.
+- No ejecuta operaciones con dinero real: ni en modo oro ni en ningún otro caso (no toca el panel de trading ni botones de comprar/vender).
 - No guarda archivos fuera de `ANZO archivos`.
 - No insiste sin fin: si un paso no le sale en 3 intentos, se detiene y te pide ayuda.
 

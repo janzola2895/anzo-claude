@@ -8,6 +8,10 @@ Es una copia independiente de ANZO (`C:\dev\anzo`, en GitHub) que **no tiene rou
 
 "Anzo" o "Hola Anzo". Mientras trabaja, solo se interrumpe si dices "Anzo" ("Anzo, para" lo detiene; "Anzo, <otra instrucción>" cambia la tarea).
 
+## Modo oro
+
+"Viernes modo oro" (o "Anzo, modo oro"): ANZO hace el análisis completo de XAUUSD intradía en TradingView (calendario económico, H4/H1/M15/M5, dólar DXY) y termina siempre en uno de tres veredictos: **hay setup válido** (entrada, stop, objetivos), **esperar** a que el oro llegue a un precio concreto para reevaluar ahí, o **no hay setup**. Cuando el oro llega al precio, vuelves a decir "modo oro" y reevalúa. El detalle (tabla de filtros y confluencias) queda en `Escritorio\ANZO archivos\modo-oro.md`. Solo analiza: nunca abre ni cierra operaciones. Protocolo en `.claude/skills/modo-oro/SKILL.md`.
+
 ## Cómo se abre
 
 Doble clic en el acceso directo **ANZO + Claude** del Escritorio (o en `Anzo.pyw`). Abre la ventana de la app y, si tu Chrome estaba cerrado, lo abre (la extensión vive ahí). **Cerrar la ventana cierra ANZO**, pero tu Chrome queda abierto. Sin consola; el detalle queda en `logs/anzo.log`. Para crear el acceso directo en otra máquina: `powershell -File scripts\install-shortcut.ps1`.

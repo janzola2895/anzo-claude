@@ -85,6 +85,7 @@ El prompt le pide a Claude máximo 3 intentos por paso antes de pedir ayuda. Com
 | `ui/app.js` | Palabra clave, interrupción, modo conversación, voz, línea del modelo |
 | `ui/orb.js`, `ui/style.css` | Orbe animado y aspecto de la ventana |
 | `.claude/skills/trading-chart-analysis/` | Skill de análisis técnico de gráficos |
+| `.claude/skills/modo-oro/` | Skill "Viernes modo oro": análisis completo de XAUUSD con veredicto (setup / esperar a un precio / sin setup) |
 | `chrome-extension/` | Mini extensión AnzoBot: renombra el grupo de pestañas "Claude" a "AnzoBot" |
 | `scripts/install-shortcut.ps1` | Crea el acceso directo del Escritorio |
 | `.env` (opcional, no versionado) | `ANZO_MODEL`, `ANZO_PORT`, `ANZO_CHROME_PROFILE`, `ANZO_OUTPUT_DIR`, `ANZO_MAX_TOOL_CALLS` — ver `.env.example` |
