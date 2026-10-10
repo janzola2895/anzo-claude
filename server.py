@@ -9,9 +9,10 @@ Endpoints:
   GET  /app.js, /style.css        -> static files
   GET  /api/stream?token&message&session_id   -> Server-Sent Events,
         one line per brain.run() event, closes on "complete"/"error"/"interrupted"
-  GET  /api/ready?token           -> startup progress for the window
+  GET  /api/ready?token           -> startup progress for the window (+ session_id to resume)
   GET  /api/model?token           -> which Claude model answered the last turn
   POST /api/interrupt  (header X-Anzo-Token)  -> brain.cancel_active()
+  POST /api/new-session (header X-Anzo-Token) -> forget the session saved for resuming
 
 A random per-launch token gates every request (EventSource can't send
 custom headers, so the stream endpoint takes it as a query param instead;
@@ -91,6 +92,42 @@ CHROME_PROFILE = os.environ.get("ANZO_CHROME_PROFILE", "Default").strip() or "De
 # Shared with the UI through /api/ready so the window can open immediately and
 # show startup progress.
 _boot_state = {"ready": False, "step": "Iniciando…"}
+
+# The Claude session of the last finished turn, kept on disk so restarting ANZO
+# resumes it (--resume) instead of starting a new one. The tabs ANZO opened in
+# Chrome belong to the session, and a new session can't see them. Older than
+# ANZO_SESSION_MAX_AGE_H hours (default 12; 0 = never resume) it is dropped:
+# every turn re-reads the whole session, so a stale one only costs tokens.
+SESSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".last-session.json")
+SESSION_MAX_AGE_S = float(os.environ.get("ANZO_SESSION_MAX_AGE_H", "").strip() or 12) * 3600
+
+
+def _save_session(session_id):
+    if not brain._valid_session(session_id):
+        return
+    try:
+        with open(SESSION_FILE, "w", encoding="utf-8") as f:
+            json.dump({"session_id": session_id, "saved_at": time.time()}, f)
+    except OSError:
+        pass  # best-effort: losing it only means the next start is a new session
+
+
+def _load_session():
+    try:
+        with open(SESSION_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        sid = data["session_id"]
+        fresh = time.time() - float(data["saved_at"]) < SESSION_MAX_AGE_S
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return sid if fresh and brain._valid_session(sid) else None
+
+
+def _forget_session():
+    try:
+        os.remove(SESSION_FILE)
+    except OSError:
+        pass
 
 # Bitacora: a running log of what's been said, summarized -- not transcribed
 # raw -- so it stays short and doesn't multiply claude -p calls against the
@@ -306,7 +343,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self._token_ok(parsed):
                 self._send_json(403, {"error": "forbidden"})
                 return
-            self._send_json(200, dict(_boot_state))
+            self._send_json(200, dict(_boot_state, session_id=_load_session()))
             return
 
         # Static files under ui/ (app.js, style.css, ...).
@@ -358,6 +395,7 @@ class Handler(BaseHTTPRequestHandler):
                     reply_parts.append(ev.get("text") or "")
                 elif t == "complete":
                     _last_turn["ok"] = True
+                    _save_session(ev.get("session_id"))
                     record_exchange(message, "".join(reply_parts))
                 elif t == "error":
                     _last_turn["ok"] = False
@@ -370,11 +408,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path != "/api/interrupt":
+        if parsed.path not in ("/api/interrupt", "/api/new-session"):
             self._send_json(404, {"error": "not found"})
             return
         if not self._origin_ok() or self.headers.get("X-Anzo-Token") != TOKEN:
             self._send_json(403, {"error": "forbidden"})
+            return
+        if parsed.path == "/api/new-session":
+            _forget_session()
+            self._send_json(200, {"ok": True})
             return
         cancelled = brain.cancel_active()
         self._send_json(200, {"cancelled": cancelled})

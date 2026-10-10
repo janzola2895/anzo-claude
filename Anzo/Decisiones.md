@@ -280,6 +280,14 @@ set ANZO_ROUTER_MODEL=<modelo tal como lo nombra CCR>   # opcional
 **Pendiente, no hecho:** el contexto crece turno a turno con cada captura (`--resume` mantiene todo), así que cada acción cuesta más a medida que avanza la conversación. Empezar una sesión nueva de vez en cuando lo reiniciaría, pero se perdería la continuidad entre pedidos.
 
 
+## Retomar la sesión (y sus pestañas) al reabrir ANZO (2026-10-09)
+
+**Problema:** tras un reinicio de ANZO, "retomar las ventanas que dejé abiertas" no funcionaba. El `session_id` de Claude vivía solo en una variable de `ui/app.js`; al cerrar la ventana se perdía, el arranque siguiente abría una sesión nueva y esa sesión no ve el grupo de pestañas AnzoBot de la anterior (las pestañas pertenecen a la sesión, ver [[Arquitectura ANZO + Claude]]).
+
+**Decisión:** `server.py` guarda el `session_id` de cada turno terminado en `.last-session.json` y `/api/ready` lo devuelve; la ventana lo adopta al arrancar. Caduca a las 12 h (`ANZO_SESSION_MAX_AGE_H`, 0 = desactivado) porque cada turno relee la sesión entera y una vieja solo gasta tokens. "Anzo, sesión nueva" (`POST /api/new-session`) la borra, ya que reiniciar dejó de ser una forma de empezar de cero.
+
+**Probado:** funciones de guardado/carga (válida, UUID inválido, caducada, borrada) y la lógica de `app.js` en un arnés de Node (adopta la sesión al arrancar, "Anzo, sigue" la reanuda, "Anzo, sesión nueva" la olvida). **No probado:** un reinicio real con voz y Chrome. Se asume, por cómo ya funciona entre turnos con `--resume`, que el grupo de pestañas reaparece; si no, es la primera cosa a revisar.
+
 ## "Viernes modo oro": análisis completo de XAUUSD con veredicto (2026-10-09)
 
 **Pedido del usuario:** al decir "Viernes modo oro", que ANZO haga el análisis completo del oro y diga si se debe abrir alguna operación o si se debe esperar a que el oro llegue a un precio y ahí evaluar de nuevo. La lista de qué debe tener un buen análisis intradía (contexto, sesión, sesgo multi-temporalidad, estructura, zona, gatillo, plan de trade) salió de la conversación del mismo día y quedó codificada en la skill.

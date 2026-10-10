@@ -23,3 +23,6 @@ logs/
 # OS junk
 Thumbs.db
 .DS_Store
+
+# Last Claude session, resumed on the next start
+.last-session.json

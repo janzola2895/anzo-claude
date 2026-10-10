@@ -8,6 +8,7 @@ Cómo usar esta versión en el día a día. Detalle técnico en [[Arquitectura A
 - Si tu Chrome estaba cerrado, ANZO lo abre: la extensión Claude in Chrome vive ahí.
 - La primera vez, la ventana pide permiso de **micrófono**: acéptalo (queda recordado).
 - Cerrar la ventana cierra ANZO. Tu Chrome y sus pestañas quedan abiertos.
+- Al volver a abrir ANZO **retoma la sesión anterior** (si tiene menos de 12 horas): sigue viendo las pestañas del grupo AnzoBot y recuerda lo que estaban haciendo. La ventana lo avisa en el registro. Para empezar de cero di **"Anzo, sesión nueva"** (las pestañas viejas quedan abiertas, pero la sesión nueva no las ve). El plazo se cambia con `ANZO_SESSION_MAX_AGE_H` en `.env` (0 = nunca retomar). Ojo: una sesión larga cuesta más tokens por turno, porque cada turno relee todo.
 - No arranca solo con Windows.
 
 ## Grupo de pestañas "AnzoBot"
@@ -50,6 +51,7 @@ Si Chrome no deja activar el Modo de desarrollador, es una política del equipo 
 | Qué dices | Qué pasa |
 |---|---|
 | "Anzo, modo conversación" (o el botón de la ventana) | Lo activa |
+| "Anzo, sesión nueva" | Olvida la sesión guardada y empieza una de cero |
 | "pausa" | Deja de escuchar sin salir del modo |
 | "continúa" / "sigamos" / "sigue" | Retoma después de una pausa |
 | "cambio y fuera" | Sale del modo conversación |

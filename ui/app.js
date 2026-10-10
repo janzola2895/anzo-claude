@@ -191,6 +191,17 @@ function interruptCurrentTurn() {
   fetch("/api/interrupt", { method: "POST", headers: { "X-Anzo-Token": TOKEN } }).catch(() => {});
 }
 
+// Whole-utterance phrases that drop the Claude session ANZO would otherwise
+// resume (also across restarts, see /api/ready) and start a fresh one.
+const NEW_SESSION_PHRASES = ["sesion nueva", "nueva sesion", "empieza de cero", "empezar de cero"];
+
+function startNewSession() {
+  sessionId = null;
+  logLine("sys", "(sesión nueva)");
+  fetch("/api/new-session", { method: "POST", headers: { "X-Anzo-Token": TOKEN } }).catch(() => {});
+  speak("Sesión nueva.");
+}
+
 function startTurn(message) {
   if (state === State.WORKING) {
     logLine("sys", "(interrumpido)");
@@ -365,6 +376,12 @@ function onFinalUtterance(text) {
       finishTurn("Detenido.");
       return;
     }
+    if (isPhrase(rest, ...NEW_SESSION_PHRASES)) {
+      interruptCurrentTurn();
+      finishTurn("Detenido.");
+      startNewSession();
+      return;
+    }
     startTurn(rest);
     return;
   }
@@ -375,6 +392,7 @@ function onFinalUtterance(text) {
     // never get sent to Claude as a regular instruction.
     if (isPhrase(text, "cambio y fuera")) { setConversationMode(false); return; }
     if (isPhrase(text, "pausa")) { setConvPaused(true); return; }
+    if (isPhrase(text, ...NEW_SESSION_PHRASES)) { startNewSession(); return; }
     startTurn(text);
     return;
   }
@@ -384,6 +402,7 @@ function onFinalUtterance(text) {
     if (rest === null) return; // no wake word heard, ignore
     if (rest) {
       if (isPhrase(rest, "modo conversacion", "activa modo conversacion")) { setConversationMode(true); return; }
+      if (isPhrase(rest, ...NEW_SESSION_PHRASES)) { startNewSession(); return; }
       startTurn(rest);
       return;
     }
@@ -395,6 +414,7 @@ function onFinalUtterance(text) {
 
   if (state === State.LISTENING) {
     if (isPhrase(text, "modo conversacion", "activa modo conversacion")) { setConversationMode(true); return; }
+    if (isPhrase(text, ...NEW_SESSION_PHRASES)) { startNewSession(); return; }
     startTurn(text);
     return;
   }
@@ -476,16 +496,23 @@ async function refreshModel() {
 async function waitForBackend() {
   setOrb("working");
   setStatus("Iniciando…");
+  let resumable = null;
   for (;;) {
     try {
       const r = await fetch("/api/ready?token=" + encodeURIComponent(TOKEN));
       const j = await r.json();
-      if (j.ready) break;
+      if (j.ready) { resumable = j.session_id; break; }
       setStatus(j.step || "Iniciando…");
     } catch (_) {
       setStatus("Esperando al servidor…");
     }
     await new Promise((res) => setTimeout(res, 700));
+  }
+  // The server keeps the last finished turn's session so a restart picks up
+  // where it left off -- and sees the Chrome tabs that session opened.
+  if (resumable && !sessionId) {
+    sessionId = resumable;
+    logLine("sys", "(retomando la sesión anterior; di \"sesión nueva\" para empezar de cero)");
   }
   backendReady = true;
   refreshModel();
