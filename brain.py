@@ -503,10 +503,15 @@ def run(message: str, session_id: str | None = None):
                             _kill_tree(proc)
                             if _valid_session(emitted_session):
                                 _capped_sessions.add(emitted_session)
+                            # Don't have ANZO say the wake word or the exact phrase
+                            # the user must answer with: the UI's echo filter
+                            # (looksLikeEcho in ui/app.js) drops any heard phrase
+                            # found in what was just spoken, so "dime: Anzo, sigue"
+                            # made the real "Anzo, sigue" get ignored as echo.
                             yield dict(t="delta", text=(
                                 f"\nLlevo {tool_calls} acciones en esta tarea y todavía "
                                 "no termino, así que paré para no gastar tus tokens "
-                                "de más. Si voy bien, dime: Anzo, sigue. Si me ves "
+                                "de más. Si voy bien, dime que siga. Si me ves "
                                 "enredado, dime cómo hacerlo o hazlo tú."))
                             yield dict(t="complete", session_id=emitted_session,
                                        ms=int((time.monotonic() - started) * 1000))

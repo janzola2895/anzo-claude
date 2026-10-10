@@ -113,6 +113,16 @@ Se agregó a CCR el proveedor `OVH sin registro` (`https://oai.endpoints.kepler.
 
 **Probado** con un `claude` falso que escribe un contador en cada acción: con el código anterior el contador siguió subiendo después de cancelar (91 → 161); con el arreglo se queda quieto.
 
+## Tras el aviso de las 60 acciones, "Anzo, sigue" no reaccionaba (2026-10-09)
+
+**Síntoma:** Anzo paró por el tope ("Llevo 60 acciones... dime: Anzo, sigue") y después, por más que se dijera "Anzo, sigue", no arrancaba otro turno. El log del servidor no mostró ninguna petición nueva a `/api/stream`: el mensaje moría en la interfaz, no en `brain.py`.
+
+**Causa:** el propio aviso decía en voz alta "Anzo, sigue". `looksLikeEcho()` (`ui/app.js`) descarta como eco cualquier frase oída que aparezca en lo último que Anzo habló, mientras suena la voz y 1,2 s después; el aviso dura ~20 s y la orden se da justo al oírla. Verificado con una simulación del filtro: "Anzo, sigue" y "Anzo sigue" caían como eco, "Anzo, continúa" no.
+
+**Arreglo:** el aviso ahora dice "Si voy bien, dime que siga" (sin la palabra clave ni la frase exacta). Para retomar sirve "Anzo, sigue" o "Anzo, continúa" una vez que Anzo termina de hablar.
+
+**Lección:** Anzo nunca debe decir en voz alta la frase que espera que el usuario conteste; el filtro de eco no distingue su voz de la tuya.
+
 ## Otras notas sueltas
 
 - La CLI de `claude` no viene con la app de escritorio — hay que instalarla aparte (`npm install -g @anthropic-ai/claude-code`) y loguearla una vez.
