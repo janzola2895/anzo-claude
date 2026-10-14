@@ -26,3 +26,6 @@ Thumbs.db
 
 # Last Claude session, resumed on the next start
 .last-session.json
+
+# Conversation summaries (private: client names, trading notes) - local only
+Anzo/Bitacora/
