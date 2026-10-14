@@ -2,7 +2,7 @@
 
 Asistente de voz personal que orquesta a Claude para desarrollar y diagnosticar Microsoft Power Platform (Canvas Apps + Power Automate) y analizar gráficos de trading, controlando **tu propio Chrome** con la extensión **Claude in Chrome** — sin APIs ni app registrations, usando las sesiones que ya tienes abiertas.
 
-Es una copia independiente de ANZO (`C:\dev\anzo`, en GitHub) que **no tiene router ni otros proveedores**: solo usa tu cuenta de Claude (login de claude.ai) y la extensión. No está conectada a GitHub.
+Es una copia independiente de ANZO (`C:\dev\anzo`) que **no tiene router ni otros proveedores**: solo usa tu cuenta de Claude (login de claude.ai) y la extensión. El código vive en un repo privado de GitHub: [janzola2895/anzo-claude](https://github.com/janzola2895/anzo-claude).
 
 ## Palabra clave
 
@@ -24,6 +24,16 @@ No arranca solo con Windows.
 - Extensión [Claude in Chrome](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn) instalada en tu perfil de Chrome (por defecto `Default`).
 - Python 3 (solo librería estándar).
 
+## Instalar en otra máquina
+
+```bash
+git clone https://github.com/janzola2895/anzo-claude.git
+cd anzo-claude
+cp .env.example .env   # opcional: solo si quieres cambiar algún valor por defecto
+```
+
+Luego cumple los requisitos de arriba, crea el acceso directo (`powershell -File scripts\install-shortcut.ps1`) y carga la mini extensión de `chrome-extension/` (ver "Grupo de pestañas"). El repo es privado: hace falta iniciar sesión en GitHub con una cuenta que tenga acceso.
+
 ## Cómo trabaja
 
 - Cada pedido corre `claude -p --chrome` con `--settings anzo-claude-settings.json`, que fuerza el endpoint oficial de Anthropic y tu login aunque la configuración global de Claude Code apunte a otro lado.
@@ -40,8 +50,10 @@ La extensión Claude in Chrome llama "Claude" al grupo de pestañas donde trabaj
 
 1. En Chrome abre `chrome://extensions`.
 2. Activa **Modo de desarrollador** (arriba a la derecha).
-3. Pulsa **Cargar descomprimida** y elige la carpeta `C:\dev\anzo-claude\chrome-extension`.
+3. Pulsa **Cargar descomprimida** y elige la carpeta `chrome-extension` de este repo (en esta máquina, `C:\dev\anzo-claude\chrome-extension`).
 
 ## Notas
 
 Ver `Anzo/` (vault de Obsidian): `Decisiones.md` explica por qué existe esta versión y cómo se probó.
+
+`Anzo/Bitacora/` guarda un resumen de cada conversación con ANZO y se sube al repo junto con el código. Por eso el repo debe seguir siendo privado.
