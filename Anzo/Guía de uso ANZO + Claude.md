@@ -38,6 +38,16 @@ Si Chrome no deja activar el Modo de desarrollador, es una política del equipo 
 
 "Viernes" es el nombre del asistente, no el día. ANZO no vigila el precio por su cuenta: para que te avise, pon una alerta de TradingView en el precio que te diga. Funciona mejor si el gráfico ya tiene un layout guardado con EMA 20/50/200, VWAP, RSI, MACD y ATR (si faltan, lo dice y no gasta acciones agregándolos). Cada modo oro cuesta del orden de 15 acciones del navegador.
 
+**Modo USDT** (ciclo pesos ↔ USDT en Binance, ganando en cada cambio):
+
+| Qué dices | Qué pasa |
+|---|---|
+| "Anzo, compré 152 USDT con 500 mil" | Lo anota en `ANZO archivos\modo-usdt.txt`. La primera compra queda como inversión inicial |
+| "Viernes modo usdt" / "Anzo, modo usdt" | Mira tu último cambio. Si tienes USDT, dice si venderlos hoy te da más pesos de los que pagaste. Si tienes pesos, si comprar te da más USDT de los que entregaste. Usa P2P (Nequi, Bancolombia, Bre-B, Daviplata) y el conversor. Si no es rentable, dice a qué precio lo sería. Deja el detalle en `ANZO archivos\modo-usdt-revision.txt` |
+| "Anzo, vendí los USDT y me llegaron 505000" | Anota la venta. Desde ahí la meta es recomprar más de 152 USDT |
+
+Cuenta lo que de verdad recibirías, con el gap ya incluido. La tasa de referencia del conversor no cuenta. La cotización real del conversor solo se ve si tienes sesión de Binance abierta en ese Chrome. Si no la tienes, revisa solo P2P y lo dice. ANZO no vigila el precio: vuelve a decir "modo usdt" más tarde. El historial es texto plano y lo puedes corregir a mano. Cada revisión cuesta del orden de 8 acciones del navegador.
+
 **Mientras está trabajando** solo lo interrumpe la palabra clave:
 
 | Qué dices | Qué pasa |
@@ -66,7 +76,7 @@ Si Chrome no deja activar el Modo de desarrollador, es una política del equipo 
 
 - No ve las pestañas que abriste tú: si quieres que mire algo, pídele que lo abra.
 - No inicia sesión por ti ni resuelve CAPTCHAs: te pide que lo hagas tú en Chrome.
-- No ejecuta operaciones con dinero real: ni en modo oro ni en ningún otro caso (no toca el panel de trading ni botones de comprar/vender).
+- No ejecuta operaciones con dinero real: ni en modo oro, ni en modo USDT, ni en ningún otro caso (no toca el panel de trading, ni botones de comprar/vender/convertir, ni crea órdenes P2P).
 - No guarda archivos fuera de `ANZO archivos`.
 - No insiste sin fin: si un paso no le sale en 3 intentos, se detiene y te pide ayuda.
 

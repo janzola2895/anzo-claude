@@ -12,6 +12,12 @@ Es una copia independiente de ANZO (`C:\dev\anzo`) que **no tiene router ni otro
 
 "Viernes modo oro" (o "Anzo, modo oro"): ANZO hace el análisis completo de XAUUSD intradía en TradingView (calendario económico, H4/H1/M15/M5, dólar DXY) y termina siempre en uno de tres veredictos: **hay setup válido** (entrada, stop, objetivos), **esperar** a que el oro llegue a un precio concreto para reevaluar ahí, o **no hay setup**. Cuando el oro llega al precio, vuelves a decir "modo oro" y reevalúa. El detalle (tabla de filtros y confluencias) queda en `Escritorio\ANZO archivos\modo-oro.md`. Solo analiza: nunca abre ni cierra operaciones. Protocolo en `.claude/skills/modo-oro/SKILL.md`.
 
+## Modo USDT
+
+"Viernes modo usdt" (o "Anzo, modo usdt"): para el ciclo pesos ↔ USDT en Binance, donde la idea es ganar en cada cambio. ANZO lee tu último cambio en `Escritorio\ANZO archivos\modo-usdt.txt` y revisa las ofertas P2P (Nequi, Bancolombia, Bre-B, Daviplata, que acepten tu monto y con buena reputación) y el conversor de Binance. Si tienes USDT, te dice si venderlos hoy te da **más pesos** de los que pagaste. Si tienes pesos, si comprar te da **más USDT** de los que entregaste. Cuenta lo que de verdad recibirías, con el gap ya incluido. Si no es rentable, te dice a qué precio lo sería. El detalle queda en `modo-usdt-revision.txt`.
+
+El historial lo llevas tú, por voz: "Anzo, compré 152 USDT con 500 mil" o "Anzo, vendí los 152 USDT y me llegaron 505000". ANZO lo anota en `modo-usdt.txt`, y la primera compra queda como inversión inicial. Solo revisa y anota: nunca compra, vende ni convierte. La cotización real del conversor solo se ve si tienes sesión de Binance en ese Chrome. Protocolo en `.claude/skills/modo-usdt/SKILL.md`.
+
 ## Cómo se abre
 
 Doble clic en el acceso directo **ANZO + Claude** del Escritorio (o en `Anzo.pyw`). Abre la ventana de la app y, si tu Chrome estaba cerrado, lo abre (la extensión vive ahí). **Cerrar la ventana cierra ANZO**, pero tu Chrome queda abierto. Sin consola; el detalle queda en `logs/anzo.log`. Para crear el acceso directo en otra máquina: `powershell -File scripts\install-shortcut.ps1`.
