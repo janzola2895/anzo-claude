@@ -42,9 +42,10 @@ Si Chrome no deja activar el Modo de desarrollador, es una política del equipo 
 
 | Qué dices | Qué pasa |
 |---|---|
-| "Anzo, compré 152 USDT con 500 mil" | Lo anota en `ANZO archivos\modo-usdt.txt`. La primera compra queda como inversión inicial |
-| "Viernes modo usdt" / "Anzo, modo usdt" | Mira tu último cambio. Si tienes USDT, dice si venderlos hoy te da más pesos de los que pagaste. Si tienes pesos, si comprar te da más USDT de los que entregaste. Usa P2P (Nequi, Bancolombia, Bre-B, Daviplata) y el conversor. Si no es rentable, dice a qué precio lo sería. Deja el detalle en `ANZO archivos\modo-usdt-revision.txt` |
-| "Anzo, vendí los USDT y me llegaron 505000" | Anota la venta. Desde ahí la meta es recomprar más de 152 USDT |
+| "Anzo, compra 10 USDT" / "compra 100 mil pesos de USDT" | **No compra**: busca la oferta P2P más barata que acepte ese monto (Nequi, Bancolombia, Bre-B, Daviplata, buena reputación). Dice cuánto pagarías y cómo quedaría tu meta si la compras. "Vende 50 USDT" hace lo mismo al revés |
+| "Anzo, compré 152 USDT con 500 mil" | Lo anota en `ANZO archivos\modo-usdt.txt`. Si no tienes pesos del ciclo esperando, cuenta como plata nueva y se suma a lo que te costaron tus USDT. La primera compra queda como inversión inicial |
+| "Viernes modo usdt" / "Anzo, modo usdt" | Mira tus saldos. Si tienes USDT, dice si venderlos hoy te da más pesos de lo que te costaron. Si tienes pesos del ciclo, si recomprar te da más USDT de los que entregaste. Usa P2P y el conversor. Si no es rentable, dice a qué precio lo sería. Deja el detalle en `ANZO archivos\modo-usdt-revision.txt` |
+| "Anzo, vendí los USDT y me llegaron 540000" | Anota la venta. Desde ahí la meta es recomprar más USDT de los que entregaste. Si vendiste solo una parte, pregunta si esos pesos son para recomprar o los sacaste |
 
 Cuenta lo que de verdad recibirías, con el gap ya incluido. La tasa de referencia del conversor no cuenta. La cotización real del conversor solo se ve si tienes sesión de Binance abierta en ese Chrome. Si no la tienes, revisa solo P2P y lo dice. ANZO no vigila el precio: vuelve a decir "modo usdt" más tarde. El historial es texto plano y lo puedes corregir a mano. Cada revisión cuesta del orden de 8 acciones del navegador.
 

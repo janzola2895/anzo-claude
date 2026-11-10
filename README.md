@@ -16,7 +16,9 @@ Es una copia independiente de ANZO (`C:\dev\anzo`) que **no tiene router ni otro
 
 "Viernes modo usdt" (o "Anzo, modo usdt"): para el ciclo pesos ↔ USDT en Binance, donde la idea es ganar en cada cambio. ANZO lee tu último cambio en `Escritorio\ANZO archivos\modo-usdt.txt` y revisa las ofertas P2P (Nequi, Bancolombia, Bre-B, Daviplata, que acepten tu monto y con buena reputación) y el conversor de Binance. Si tienes USDT, te dice si venderlos hoy te da **más pesos** de los que pagaste. Si tienes pesos, si comprar te da **más USDT** de los que entregaste. Cuenta lo que de verdad recibirías, con el gap ya incluido. Si no es rentable, te dice a qué precio lo sería. El detalle queda en `modo-usdt-revision.txt`.
 
-El historial lo llevas tú, por voz: "Anzo, compré 152 USDT con 500 mil" o "Anzo, vendí los 152 USDT y me llegaron 505000". ANZO lo anota en `modo-usdt.txt`, y la primera compra queda como inversión inicial. Solo revisa y anota: nunca compra, vende ni convierte. La cotización real del conversor solo se ve si tienes sesión de Binance en ese Chrome. Protocolo en `.claude/skills/modo-usdt/SKILL.md`.
+Para meter plata nueva: "Anzo, compra 10 USDT" (o "compra 100 mil pesos de USDT") busca la oferta P2P más barata que acepte ese monto. También te dice cómo quedaría tu meta si la compras. "Vende 50 USDT" hace lo mismo al revés.
+
+El historial lo llevas tú, por voz: "Anzo, compré 152 USDT con 500 mil" o "Anzo, vendí los 162 USDT y me llegaron 540000". ANZO lo anota en `modo-usdt.txt` con dos saldos: tus USDT con lo que te costaron, y los pesos del ciclo con los USDT de donde salieron. La plata nueva se suma a lo que te costaron tus USDT, así la meta sigue siendo no perder nada. La primera compra queda como inversión inicial. Solo revisa y anota: nunca compra, vende ni convierte. La cotización real del conversor solo se ve si tienes sesión de Binance en ese Chrome. Protocolo en `.claude/skills/modo-usdt/SKILL.md`.
 
 ## Cómo se abre
 

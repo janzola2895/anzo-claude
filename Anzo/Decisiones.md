@@ -333,3 +333,20 @@ Corrida real por `brain.run("modo oro")` (misma ruta que la app, con el Chrome d
 **Cómo convive con el límite de "no operes":** es aritmética sobre la regla del propio usuario (recibir más de lo que entregó), no una recomendación. Nunca dice "vende ya". Cierra con "cálculo con precios del momento, la decisión y la operación son tuyas". No toca botones de comprar, vender ni convertir, ni crea órdenes.
 
 **Probado:** las dos consultas P2P y la tasa de referencia desde una pestaña de binance.com en un navegador aislado, sin sesión. Con el ejemplo del usuario, vender 152 USDT daba 493270 COP (no rentable, faltan 6730; equilibrio 3289.47). Recomprar con 505000 COP daba 154.62 USDT (rentable). También se probó que `brain.py` compila, que el prompt no tiene caracteres de `cmd.exe` y que el frontmatter de la skill es válido. **No probado:** una corrida de punta a punta por `brain.run("modo usdt")` con el Chrome real del usuario. Tampoco el conversor con sesión: si "A" se llena solo al escribir el monto o exige previsualizar. Tampoco cómo transcribe el dictado "modo usdt".
+
+### Modo USDT: mejor oferta para una cantidad y plata nueva (2026-11-10)
+
+**Pedido del usuario:** cuando vaya a meter más fondos, decir "Anzo, compra 10 USDT" y que ANZO diga cuál oferta le conviene más.
+
+**Implementación:**
+- **"Compra/vende X" es buscar, no operar.** El mismo código P2P ahora recibe `UNIDAD` (`'USDT'` o `'COP'`) además del monto. Con `META = null` solo busca la mejor oferta: al comprar la más barata y al vender la más cara, entre las que aceptan ese monto (mismos medios de pago y reputación). Con montos chicos importan los mínimos de cada oferta. Medido: para 10 USDT las mejores pedían mínimo 10 mil o 20 mil pesos. Para 100 mil pesos apareció una más barata con mínimo de 50 mil.
+- **El historial pasó a dos saldos.** Antes la última línea era el estado completo (COMPRA o VENTA). Con plata nueva eso se rompía: anotar "compré 10 USDT con 32720" como COMPRA habría dejado la meta en 32720 pesos. Ahora cada línea termina con `USDT | costaron COP | COP | salieron de USDT`, y hay cuatro operaciones:
+  - APORTE: compra con plata nueva. Suma USDT y costo.
+  - VENTA: USDT a pesos que se quedan en el ciclo.
+  - COMPRA: pesos del ciclo a USDT.
+  - RETIRO: vende USDT y saca los pesos. Baja el costo en proporción.
+
+  Las metas salen de la última línea: vender por más de "costaron COP" y recomprar más de "salieron de USDT". Cuando la operación es ambigua (una venta parcial, o una compra que no usa todos los pesos del ciclo), ANZO pregunta. Para cambiar el formato no hubo que migrar nada: todavía no existía ningún `modo-usdt.txt`.
+- La frase de `SYSTEM_PROMPT` agrega "pide comprar o vender una cantidad de USDT (eso es buscar la mejor oferta, no comprar)".
+
+**Probado:** el código exacto de la skill en un navegador aislado, en cuatro casos: comprar 10 USDT, comprar con 100 mil pesos, vender 152 USDT con meta 500000 y recomprar con 505000 con meta 152. También que el JS pasa `node --check`. **No probado:** una corrida por voz de punta a punta (el login del CLI estaba vencido ese día).
