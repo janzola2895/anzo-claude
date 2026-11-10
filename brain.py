@@ -66,6 +66,23 @@ _LIMIT_RE = re.compile(
     re.IGNORECASE,
 )
 _LIMIT_MAX_LEN = 300
+
+# The claude.ai login itself ran out: "Failed to authenticate: OAuth session
+# expired and could not be refreshed" (2026-11-10: the refresh token has its
+# own expiry, and that one had passed on 2026-10-25), "Not logged in · Please
+# run /login", "Invalid API key", 401s. Like the quota message it arrives as a
+# synthetic assistant turn (flagged error="authentication_failed") and again
+# as the result. Retrying can't fix it, so ANZO says what to do in Spanish
+# instead of reading the English out loud. Same short-message guard as above.
+_AUTH_RE = re.compile(
+    r"failed to authenticate|authentication_failed|not logged in|run /login|"
+    r"oauth (?:session|token)|invalid api key|\b401\b",
+    re.IGNORECASE,
+)
+AUTH_MESSAGE = ("Tu sesión de Claude se venció y no pude renovarla, así que no "
+                "puedo trabajar. Abre una terminal, escribe claude auth login y "
+                "entra con tu cuenta de Claude en el navegador. Después repíteme "
+                "lo que me pediste, no hace falta reiniciarme.")
 # Empty by default (the CLI's own "Manual" mode): ANZO's job is browser control
 # through the extension, and anything outside the allowlist in build_command()
 # gets blocked instead of silently allowed.
@@ -217,6 +234,21 @@ def is_limit_error(text) -> bool:
 
 def _limit_message(detail: str) -> str:
     return ("Llegaste al limite de uso de tu membresia de Claude. " + detail)[:400]
+
+
+def is_auth_error(text) -> bool:
+    """Does this message look like 'the claude.ai login expired / is missing'?"""
+    text = (text or "").strip()
+    return bool(text) and len(text) <= _LIMIT_MAX_LEN and bool(_AUTH_RE.search(text))
+
+
+def _auth_failed(detail, session_id, started: float):
+    """Events for a turn the CLI couldn't even start because the login is gone:
+    the original text goes to the log, the spoken answer says how to fix it."""
+    yield dict(t="warning", message=str(detail or "").strip()[:300])
+    yield dict(t="delta", text=AUTH_MESSAGE)
+    yield dict(t="complete", session_id=session_id,
+               ms=int((time.monotonic() - started) * 1000))
 
 
 def _valid_session(sid) -> bool:
@@ -491,6 +523,12 @@ def run(message: str, session_id: str | None = None):
             if kind == "assistant":
                 for block in (ev.get("message") or {}).get("content") or []:
                     btype = block.get("type")
+                    if (btype == "text" and not text_seen
+                            and (ev.get("error") == "authentication_failed"
+                                 or is_auth_error(block.get("text")))):
+                        _kill_tree(proc)
+                        yield from _auth_failed(block.get("text"), emitted_session, started)
+                        return
                     if (btype == "text" and not text_seen and is_limit_error(block.get("text"))):
                         # Quota message arrives as a synthetic assistant turn.
                         _kill_tree(proc)
@@ -537,6 +575,9 @@ def run(message: str, session_id: str | None = None):
 
             if kind == "result":
                 usage = ev.get("usage") or {}
+                if not text_seen and is_auth_error(ev.get("result")):
+                    yield from _auth_failed(ev.get("result"), emitted_session, started)
+                    return
                 if not text_seen and is_limit_error(ev.get("result")):
                     yield dict(t="error", message=_limit_message(str(ev["result"]).strip()))
                     return
@@ -573,6 +614,9 @@ def run(message: str, session_id: str | None = None):
                 yield dict(t="interrupted")
             else:
                 err_text = " | ".join(list(err_buf)[-6:])
+                if not text_seen and any(is_auth_error(l) for l in err_buf):
+                    yield from _auth_failed(err_text, emitted_session, started)
+                    return
                 if not text_seen and any(is_limit_error(l) for l in err_buf):
                     yield dict(t="error", message=_limit_message(err_text[:_LIMIT_MAX_LEN]))
                     return

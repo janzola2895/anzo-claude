@@ -90,6 +90,7 @@ Debajo del estado aparece `● Modelo: claude-sonnet-5 · Claude`. Punto verde: 
 |---|---|
 | "La extensión Claude in Chrome no está conectada" | Abre Chrome, revisa en `chrome://extensions` que Claude esté activa y repite el pedido. Si sigue, reinicia Chrome |
 | "Llegaste al límite de uso de tu membresía de Claude" | Hay que esperar a que se reinicie el límite de tu plan |
+| "Tu sesión de Claude se venció y no pude renovarla" | Abre una terminal, escribe `claude auth login` y entra con tu cuenta de claude.ai en el navegador. Luego repite el pedido; no hace falta reiniciar ANZO |
 | Chrome pide permiso para un sitio | Acéptalo en Chrome; es el permiso por sitio de la extensión |
 | Se queda "pensando" mucho rato | Mira el final de `C:\dev\anzo-claude\logs\anzo.log` |
 | Modo oro dice que el gráfico sale en blanco / no puede leer las velas | Chrome cree que la ventana del grupo AnzoBot está tapada por otra y no la pinta. Déjala visible (segundo monitor, o junto a la ventana de ANZO, no debajo) y repite "modo oro". Alternativa: en `chrome://flags` pon "Calculate window occlusion on Windows" en Disabled y reinicia Chrome |

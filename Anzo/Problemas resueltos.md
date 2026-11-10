@@ -123,6 +123,16 @@ Se agregó a CCR el proveedor `OVH sin registro` (`https://oai.endpoints.kepler.
 
 **Lección:** Anzo nunca debe decir en voz alta la frase que espera que el usuario conteste; el filtro de eco no distingue su voz de la tuya.
 
+## "Failed to authenticate: OAuth session expired and could not be refreshed" (2026-11-10)
+
+**Síntoma:** al pedir "compra 10 usdt", Anzo respondió en inglés "Failed to authenticate: OAuth session expired and could not be refreshed" y no hizo nada.
+
+**Causa:** venció el login de claude.ai del CLI `claude`. En `~/.claude/.credentials.json`, el token de renovación tiene su propio vencimiento (`refreshTokenExpiresAt`), y ese había pasado el 2026-10-25. Al no poder renovar, el CLI vació los tokens. Con `--output-format stream-json` llega como un turno sintético del asistente con `error: "authentication_failed"` y ese texto, y luego un `result` con `is_error: true`. `brain.py` lo pasaba tal cual como respuesta hablada. No gasta tokens: falla antes de llamar a la API. Ojo: `claude auth status` desde una terminal normal dice `loggedIn: true`, porque la configuración global todavía tiene el `apiKeyHelper` del router. Lo que vale es el estado con `anzo-claude-settings.json`.
+
+**Arreglo:** volver a iniciar sesión con `claude auth login --claudeai` (abre el navegador). No hace falta reiniciar ANZO. Además, `brain.py` ahora reconoce estos errores (`is_auth_error`: "failed to authenticate", "not logged in", "run /login", "oauth session/token", "invalid api key", 401). Deja el texto original en el registro y dice en español qué hacer, en vez de leer el inglés. Probado con `brain.run("hola")` y la sesión vencida.
+
+**Lección:** el login del CLI vence aunque ANZO se use seguido; si vuelve a pasar, basta con `claude auth login`.
+
 ## Otras notas sueltas
 
 - La CLI de `claude` no viene con la app de escritorio — hay que instalarla aparte (`npm install -g @anthropic-ai/claude-code`) y loguearla una vez.
